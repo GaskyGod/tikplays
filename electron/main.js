@@ -208,8 +208,8 @@ autoUpdater.on('download-progress', (p) => {
     transferred: p.transferred, total: p.total
   });
 });
-autoUpdater.on('update-downloaded', (info) => {
-  mainWindow?.webContents.send('update:ready', info);
+autoUpdater.on('update-downloaded', () => {
+  autoUpdater.quitAndInstall(); // instala y reinicia automáticamente
 });
 autoUpdater.on('error', (err) => {
   mainWindow?.webContents.send('update:error', String(err));
