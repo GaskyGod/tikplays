@@ -1,6 +1,6 @@
 {
   "name": "tikplays",
-  "version": "2.0.17",
+  "version": "2.0.18",
   "description": "App de Webhooks para TikTok Live con overlays y Electron.",
   "author": "GaskyGod",
   "main": "electron/main.js",
@@ -43,18 +43,19 @@
       "output": "dist"
     },
     "files": [
-      "public/**",
-      "electron/**",
-      "server.js",
-      "firebase-admin.js",
-      "goals.json",
-      "giftCatalog.json",
-      "topGift.json",
-      "webhooks.json",
-      "!dist/**",
-      "!node_modules/.cache/**",
-      "!**/*.map"
-    ],
+  "public/**",
+  "electron/**",
+  "server/**",       
+  "server.js",
+  "firebase-admin.js",
+  "goals.json",
+  "giftCatalog.json",
+  "topGift.json",
+  "webhooks.json",
+  "!dist/**",
+  "!node_modules/.cache/**",
+  "!**/*.map"
+],
     "asar": true,
     "npmRebuild": true,
     "win": {
