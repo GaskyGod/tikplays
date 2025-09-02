@@ -168,6 +168,9 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    log.info('[env] isPackaged=', app.isPackaged, 'platform=', process.platform, 'arch=', process.arch);
+    log.info('[env] currentVersion=', app.getVersion());
+
     try { await session.defaultSession.clearCache(); } catch {}
     try {
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -187,6 +190,20 @@ if (!gotLock) {
     await createMainWindow();
     createTray();
     registerWinsHotkeys();
+
+    // --- DIAGNÓSTICO: comprobar latest.yml directamente ---
+try {
+  const url = 'https://github.com/GaskyGod/tikplays/releases/latest/download/latest.yml';
+  log.info('[diag] Fetching latest.yml', url);
+  const res = await _fetch(url, { cache: 'no-store' });
+  log.info('[diag] latest.yml status', res.status);
+  const text = await res.text();
+  log.info('[diag] latest.yml first 200 chars:', text.slice(0, 200).replace(/\n/g, ' '));
+} catch (e) {
+  log.error('[diag] latest.yml fetch error', e);
+}
+// ------------------------------------------------------
+
 
     // ======== AutoUpdater ========
     if (!isDev) {
