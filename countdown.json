@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "running": false,
+  "secondsLeft": 369,
+  "secondsPerCoin": 1,
+  "title": "Tiempo restante",
+  "maxSeconds": 0
+}

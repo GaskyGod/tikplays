@@ -1,0 +1,15 @@
+{
+  "users": {
+    "tester": {
+      "id": "tester",
+      "name": "tester",
+      "avatar": "",
+      "coins": 37
+    }
+  },
+  "topN": 5,
+  "title": "Top Monedas",
+  "unit": "💎",
+  "coinIconUrl": "",
+  "resetOnDisconnect": true
+}

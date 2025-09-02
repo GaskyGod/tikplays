@@ -1,0 +1,25 @@
+{
+  "titleLeft": "Me reiniciasls",
+  "titleRight": "Me salvas",
+  "pointsPerCoin": 1,
+  "left": {
+    "gifts": [
+      "5655",
+      "5660"
+    ],
+    "points": 0
+  },
+  "right": {
+    "gifts": [
+      "6064",
+      "6267",
+      "7529"
+    ],
+    "points": 0
+  },
+  "leadCountdown": 10,
+  "leader": null,
+  "deadline": 0,
+  "round": 9,
+  "autoResetOnWin": true
+}

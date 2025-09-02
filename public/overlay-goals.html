@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Overlay Goals</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  :root {
+    --accent: #22c55e; /* verde por defecto */
+    --bg: transparent;
+    --text: #ffffff;
+    --muted: #cbd5e1;
+    --round: 20px;
+  }
+  html, body {
+    margin:0; padding:0; background: var(--bg); overflow:hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    color: var(--text);
+  }
+  .cont {
+    width: 100vw; height: 100vh; display:flex; align-items:center; justify-content:center;
+    padding: 20px; box-sizing: border-box;
+  }
+  .stack { display:flex; flex-direction:column; gap:16px; width: min(900px, 92vw); }
+  .card {
+    background: rgba(17, 24, 39, .55);
+    border: 1px solid rgba(148,163,184,.2);
+    border-radius: var(--round);
+    padding: 16px 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    backdrop-filter: blur(6px);
+  }
+  .row { display:flex; align-items:center; gap:12px; }
+  .title { font-weight:700; letter-spacing:.2px; font-size: clamp(16px, 2.4vw, 22px); }
+  .metric {
+    font-weight:800; font-size: clamp(26px, 4.2vw, 40px);
+    text-shadow: 0 2px 10px rgba(0,0,0,.35);
+  }
+  .muted { color: var(--muted); font-weight:500; letter-spacing:.2px; }
+  .bar {
+    position:relative; height: 16px; border-radius: calc(var(--round) - 10px);
+    background: rgba(148,163,184,.25); overflow:hidden; width:100%; margin-top:10px;
+  }
+  .fill {
+    position:absolute; inset:0 auto 0 0; width:0%;
+    background: linear-gradient(90deg, var(--accent), color-mix(in hsl, var(--accent), white 20%));
+    box-shadow: 0 0 20px color-mix(in hsl, var(--accent), transparent 70%);
+    border-radius: inherit;
+    transition: width .6s cubic-bezier(.2,.8,.2,1);
+  }
+  .glow {
+    position:absolute; inset:-40% -20% -40% -20%;
+    background: radial-gradient(60% 60% at 10% 50%, color-mix(in hsl, var(--accent), transparent 85%), transparent),
+                radial-gradient(60% 60% at 70% 50%, color-mix(in hsl, var(--accent), transparent 85%), transparent);
+    filter: blur(18px); opacity:.35; pointer-events:none;
+  }
+  .icon {
+    width: clamp(24px, 4vw, 36px); height: clamp(24px, 4vw, 36px);
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius: 12px; background: rgba(148,163,184,.14);
+  }
+  .compact .title{ font-size: clamp(12px, 2vw, 16px); }
+  .compact .metric{ font-size: clamp(18px, 3vw, 28px); }
+  .compact .bar{ height: 12px; }
+  .g { display:grid; grid-template-columns: 1fr; gap:16px; }
+  @media (min-width: 640px) {
+    .both .g { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="cont">
+  <div id="root" class="stack">
+    <!-- Se inyectan tarjetas según metric -->
+  </div>
+</div>
+
+<script>
+  // --- Parámetros ---
+  const params = new URLSearchParams(location.search);
+  const METRIC = (params.get('metric') || 'both').toLowerCase(); // likes | followers | both
+  const TITLE = params.get('title') || '';
+  const ACCENT = params.get('accent') || '';
+  const BG = params.get('bg') || '';
+  const ROUNDED = params.get('rounded');
+  const COMPACT = (params.get('compact') || 'false').toLowerCase() === 'true';
+
+  if (ACCENT) document.documentElement.style.setProperty('--accent', ACCENT);
+  if (BG) document.documentElement.style.setProperty('--bg', BG);
+  if (ROUNDED && !Number.isNaN(parseInt(ROUNDED))) {
+    document.documentElement.style.setProperty('--round', `${parseInt(ROUNDED)}px`);
+  }
+  if (COMPACT) document.body.classList.add('compact');
+
+  const socket = io();
+  let goals = { likes:{target:1000,current:0}, followers:{target:10,current:0} };
+
+  const root = document.getElementById('root');
+
+  function fmt(n){ return new Intl.NumberFormat().format(n||0); }
+  function pct(cur, tar){ return Math.max(0, Math.min(100, tar ? (cur*100/tar) : 0)); }
+
+  function makeCard(kind) {
+    const wrap = document.createElement('div');
+    wrap.className = 'card';
+    wrap.innerHTML = `
+      <div class="glow"></div>
+      <div class="row">
+        <div class="icon">${ kind==='likes' ? '❤️' : '👤' }</div>
+        <div style="flex:1">
+          <div class="title">${ kind==='likes' ? 'Meta de Likes' : 'Meta de Seguidores' }</div>
+          <div class="muted" id="${kind}-sub">—</div>
+        </div>
+        <div class="metric" id="${kind}-metric">0</div>
+      </div>
+      <div class="bar"><div class="fill" id="${kind}-fill"></div></div>
+    `;
+    return wrap;
+  }
+
+  function renderLayout(){
+    root.innerHTML = '';
+    const outer = document.createElement('div');
+    outer.className = 'g ' + (METRIC==='both' ? 'both' : '');
+
+    const list = METRIC === 'both' ? ['likes','followers'] : [METRIC];
+    for (const k of list) { outer.appendChild(makeCard(k)); }
+
+    if (TITLE) {
+      const titleBar = document.createElement('div');
+      titleBar.className = 'card';
+      titleBar.innerHTML = `<div class="row"><div class="title" style="font-size:clamp(18px,3vw,26px)">${decodeURIComponent(TITLE)}</div></div>`;
+      root.appendChild(titleBar);
+    }
+    root.appendChild(outer);
+    updateUI();
+  }
+
+  function updateUI(){
+    const upd = (k) => {
+      const g = goals[k]; if (!g) return;
+      const sub = document.getElementById(`${k}-sub`);
+      const metric = document.getElementById(`${k}-metric`);
+      const fill = document.getElementById(`${k}-fill`);
+      if (!sub || !metric || !fill) return;
+
+      sub.textContent = `${fmt(g.current)} / ${fmt(g.target)}`;
+      metric.textContent = fmt(g.current);
+      fill.style.width = pct(g.current, g.target) + '%';
+    };
+    if (METRIC==='both' || METRIC==='likes') upd('likes');
+    if (METRIC==='both' || METRIC==='followers') upd('followers');
+  }
+
+  // Estado inicial desde REST
+  fetch('/getGoals').then(r=>r.json()).then(g=>{
+    goals = g || goals; updateUI();
+  }).catch(()=>{});
+
+  // Realtime
+  socket.on('goals', g => { goals = g || goals; updateUI(); });
+  socket.on('likeProgress', likes => { goals.likes = likes; updateUI(); });
+  socket.on('followersProgress', f => { goals.followers = f; updateUI(); });
+
+  renderLayout();
+</script>
+</body>
+</html>

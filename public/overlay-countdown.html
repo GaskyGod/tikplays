@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Overlay: Cuenta atrás</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: transparent;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .card {
+      position: relative; /* <- para posicionar el delta encima */
+      display:flex; flex-direction:column; gap:.25rem;
+      background: rgba(0,0,0,.5);
+      color: white; padding: .75rem 1rem; border-radius: var(--radius, 16px);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,.12);
+      min-width: 260px;
+    }
+    .title { font-size: 14px; opacity: .9 }
+    .time  { font-size: 36px; font-weight: 800; line-height: 1; }
+    .bar   { position: relative; height: 6px; background: rgba(255,255,255,.2); border-radius: 999px; overflow: hidden; margin-top: .4rem; }
+    .fill  { position:absolute; inset:0; width:0; background: var(--accent, #22c55e); }
+
+    /* ---- flash +Xs ---- */
+    .delta {
+      position: absolute;
+      right: .75rem;               /* esquina superior derecha de la tarjeta */
+      top: .5rem;
+      font-weight: 900;
+      font-size: 28px;
+      color: #ffd54a;              /* amarillo */
+      text-shadow: 0 2px 0 rgba(0,0,0,.6), 0 0 8px rgba(0,0,0,.35);
+      opacity: 0;
+      transform: translateY(6px) scale(.96);
+      transition: opacity .18s ease, transform .18s ease;
+      pointer-events: none;
+    }
+    .delta.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="title" id="title">Tiempo restante</div>
+
+    <!-- “+Xs” aparece/ desaparece aquí -->
+    <div id="delta" class="delta"></div>
+
+    <div class="time" id="time">00:00</div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+  </div>
+
+  <script>
+    // Params opcionales: ?accent=%23a855f7&rounded=24
+    const params = new URLSearchParams(location.search);
+    const accent = params.get('accent') || '';
+    const rounded = params.get('rounded') || '';
+    if (accent) document.documentElement.style.setProperty('--accent', accent);
+    if (rounded) document.documentElement.style.setProperty('--radius', rounded + 'px');
+
+    const ioSocket = io();
+    const $ = (s) => document.querySelector(s);
+    let maxSeen = 0;
+
+    function fmt(sec){
+      sec = Math.max(0, parseInt(sec, 10) || 0);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    // +Xs bonito (si es múltiplo exacto de min/hora mostramos +2m / +1h)
+    function fmtDelta(sec){
+      sec = Math.round(sec || 0);
+      if (sec <= 0) return '';
+      if (sec % 3600 === 0) return `+${sec/3600}h`;
+      if (sec % 60 === 0 && sec >= 60) return `+${sec/60}m`;
+      return `+${sec}s`;
+    }
+
+    let deltaTimer = null;
+    function flashDelta(amount){
+      const el = $('#delta');
+      const txt = fmtDelta(amount);
+      if (!txt) return;
+      el.textContent = txt;
+      el.classList.add('show');
+      clearTimeout(deltaTimer);
+      // visible ~1.1s y luego fade-out
+      deltaTimer = setTimeout(() => {
+        el.classList.remove('show');
+      }, 1100);
+    }
+
+    ioSocket.on('countdown', (st) => {
+      $('#title').textContent = st?.title || 'Tiempo restante';
+      $('#time').textContent  = fmt(st?.secondsLeft || 0);
+
+      if ((st?.maxSeconds || 0) > 0) {
+        maxSeen = st.maxSeconds;
+      } else {
+        maxSeen = Math.max(maxSeen, st?.secondsLeft || 0);
+      }
+      const pct = maxSeen > 0 ? Math.min(100, (st.secondsLeft / maxSeen) * 100) : 0;
+      $('#fill').style.width = pct + '%';
+    });
+
+    // 👇 Nuevo: escuchar la cantidad añadida y mostrar “+Xs”
+    ioSocket.on('countdown:add', ({ amount }) => {
+      flashDelta(amount);
+    });
+  </script>
+</body>
+</html>

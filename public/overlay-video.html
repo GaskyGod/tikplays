@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Overlay Video</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    html,body{margin:0;padding:0;background:transparent;overflow:hidden}
+    video{
+      position:fixed;inset:0;width:100vw;height:100vh;
+      object-fit:contain;background:transparent;display:none;
+    }
+    .fade-out{ opacity:0; transition:opacity .25s ease; }
+  </style>
+</head>
+<body>
+  <video id="v" playsinline preload="auto"></video>
+  <script>
+    const ioClient = io();
+    const v = document.getElementById('v');
+
+    // Pila LIFO para “pospuestos”
+    const stack = [];
+    // Estado del que está sonando ahora (para poder push con datos correctos)
+    let current = null;
+    // Evita carreras al cambiar de src
+    let switching = false;
+
+    function showVideo() {
+      v.classList.remove('fade-out');
+      v.style.display = 'block';
+      v.style.opacity = '1';
+    }
+    function hideVideo() {
+      v.classList.add('fade-out');
+      setTimeout(() => {
+        v.pause();
+        v.removeAttribute('src');
+        v.load();
+        v.style.display = 'none';
+        current = null;
+      }, 250);
+    }
+
+    // Intenta reproducir respetando autoplay
+    async function tryPlay() {
+      try { await v.play(); }
+      catch {
+        v.muted = true;
+        try { await v.play(); } catch {}
+      }
+    }
+
+    // Reproduce un “meta” {url, volume, loop, time}
+    async function playMeta(meta){
+      switching = true;
+      try {
+        // Config
+        v.loop   = !!meta.loop;
+        v.volume = Math.max(0, Math.min(1, Number(meta.volume)||1));
+        // Corta el actual de forma limpia
+        v.pause();
+        v.classList.remove('fade-out');
+        v.style.display = 'block';
+        // Asigna la nueva fuente
+        v.src = meta.url;
+        // Cuando esté listo, ajusta tiempo si aplica
+        const onLoaded = () => {
+          if (meta.time && Number.isFinite(meta.time)) {
+            // Si pide reanudar desde X s
+            try { v.currentTime = Math.max(0, meta.time); } catch {}
+          }
+          v.removeEventListener('loadedmetadata', onLoaded);
+        };
+        v.addEventListener('loadedmetadata', onLoaded);
+        // Reproduce
+        await tryPlay();
+        current = { ...meta };
+      } finally {
+        switching = false;
+      }
+    }
+
+    // Llamado desde el servidor
+    function play(req){
+      const meta = {
+        url: req.url,
+        volume: req.volume ?? 1,
+        loop: !!req.loop,
+        time: 0
+      };
+
+      // Si hay uno sonando y no estamos cambiando, lo posponemos
+      const isActive = !!current && !v.paused && !v.ended && v.currentSrc;
+      if (isActive && !switching) {
+        // toma el segundo exacto (guardamos en current en cada timeupdate)
+        stack.push({ ...current });
+      }
+
+      // Reproduce el nuevo inmediatamente
+      showVideo();
+      playMeta(meta);
+    }
+
+    // Mantén current.time actualizado para reanudar fino
+    v.addEventListener('timeupdate', () => {
+      if (current) current.time = v.currentTime || 0;
+    });
+
+    // Cuando termina (y no está en loop), pasa al anterior si hay
+    v.addEventListener('ended', () => {
+      if (v.loop) return; // en loop, queda sonando
+      nextFromStackOrHide();
+    });
+
+    v.addEventListener('error', () => {
+      // si falla esta fuente, intenta regresar al anterior
+      nextFromStackOrHide();
+    });
+
+    function nextFromStackOrHide(){
+      if (switching) return;
+      const next = stack.pop();
+      if (next) {
+        playMeta(next);
+      } else {
+        hideVideo();
+      }
+    }
+
+    // Mensajes del server
+    ioClient.on('playVideo', play);
+
+    // Modo prueba por querystring: ?url=/videos/x.mp4&loop=1&vol=0.6
+    const q = new URLSearchParams(location.search);
+    if (q.get('url')) {
+      play({
+        url: q.get('url'),
+        loop: q.get('loop') === '1',
+        volume: parseFloat(q.get('vol')||'1')
+      });
+    }
+  </script>
+</body>
+</html>

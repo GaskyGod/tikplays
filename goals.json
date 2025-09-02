@@ -1,0 +1,10 @@
+{
+  "followers": {
+    "target": 1000,
+    "current": 143
+  },
+  "likes": {
+    "target": 1000,
+    "current": 24114
+  }
+}

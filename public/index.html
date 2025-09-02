@@ -1,0 +1,2475 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tikplays</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="color-scheme" content="dark light">
+  <style>
+    #log { scroll-behavior: smooth; }
+    .cell-editable[contenteditable="true"]:focus { outline: 2px solid rgba(59,130,246,.6); border-radius: .375rem; }
+    dialog::backdrop { background: rgba(0,0,0,.5); }
+    #licenseGate { position: fixed; inset: 0; z-index: 9999; display: none; }
+  </style>
+  <style>
+  /* --------- Eventos: look limpio ---------- */
+  .table-events td,.table-events th{padding-top:.6rem;padding-bottom:.6rem}
+  .table-events tr:hover{background:rgba(0,0,0,.02)}
+  @media (prefers-color-scheme: dark){
+    .table-events tr:hover{background:rgba(255,255,255,.03)}
+  }
+
+  /* Botones redondos con icono */
+  .icon-btn{
+    width:28px;height:28px;border-radius:9999px;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:background .15s ease,opacity .15s ease;
+  }
+  .icon-btn svg{width:16px;height:16px}
+  .icon-green{color:#10b981}   .icon-green:hover{background:rgba(16,185,129,.12)}
+  .icon-cyan{color:#06b6d4}    .icon-cyan:hover{background:rgba(6,182,212,.12)}
+  .icon-amber{color:#f59e0b}   .icon-amber:hover{background:rgba(245,158,11,.12)}
+  .icon-rose{color:#f43f5e}    .icon-rose:hover{background:rgba(244,63,94,.12)}
+
+  /* Celdas editables truncadas (URLs largas) */
+  .cell-editable{
+    display:inline-block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:38ch; /* ajusta a gusto */
+  }
+</style>
+<style>
+  /* chips/resumen */
+  .chip{display:inline-flex;align-items:center;gap:.35rem;
+        padding:.15rem .5rem;border-radius:999px;font-size:11px;
+        border:1px solid var(--b);background:var(--bg);color:var(--fg)}
+  .chip svg{width:13px;height:13px;opacity:.9}
+
+  .chip-web {--bg:#ecfeff;--b:#cffafe;--fg:#0369a1}
+  .dark .chip-web {--bg:#082f49;--b:#0c4a6e;--fg:#67e8f9}
+
+  .chip-key {--bg:#eef2ff;--b:#c7d2fe;--fg:#3730a3}
+  .dark .chip-key {--bg:#1e1b4b;--b:#312e81;--fg:#a5b4fc}
+
+  .chip-mc  {--bg:#fef9c3;--b:#fde68a;--fg:#92400e}
+  .dark .chip-mc  {--bg:#422006;--b:#713f12;--fg:#facc15}
+
+  .chip-snd {--bg:#ecfccb;--b:#d9f99d;--fg:#166534}
+  .dark .chip-snd {--bg:#052e16;--b:#14532d;--fg:#86efac}
+
+  .chip-vid {--bg:#ffe4e6;--b:#fecdd3;--fg:#9f1239}
+  .dark .chip-vid {--bg:#3f0612;--b:#881337;--fg:#fecdd3}
+
+  /* tabla compacta */
+  .events-row{transition:background .12s ease}
+  .events-row:hover{background:rgba(0,0,0,.03)}
+  @media (prefers-color-scheme: dark){
+    .events-row:hover{background:rgba(255,255,255,.03)}
+  }
+
+  /* modo denso */
+  .dense .events-row td{padding-top:.35rem;padding-bottom:.35rem}
+</style>
+
+
+
+</head>
+<body class="h-full bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+
+  <script>
+(function ensureDeviceId(){
+  if (window.deviceInfo?.deviceId) return; // ya existe (por preload)
+  let id = localStorage.getItem('deviceId');
+  if (!id) {
+    id = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c/4).toString(16)
+    );
+    localStorage.setItem('deviceId', id);
+  }
+  window.deviceInfo = { deviceId: id };
+})();
+</script>
+
+  <!-- GATE DE LICENCIA -->
+  <section id="licenseGate" class="bg-zinc-50/90 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-xl">
+      <h2 class="text-xl font-bold mb-2">Acceso con licencia</h2>
+      <p class="text-sm text-zinc-500 mb-4">Ingresa tu clave/licencia para usar la aplicación.</p>
+      <div class="space-y-3">
+        <input id="licenseInput" type="text" placeholder="PEGA TU LICENCIA AQUÍ"
+               class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" />
+        <button id="licenseBtn"
+                class="w-full rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2">Validar licencia</button>
+        <p id="licenseMsg" class="text-xs text-zinc-500"></p>
+      </div>
+    </div>
+  </section>
+  <!-- /GATE DE LICENCIA -->
+
+  <!-- LAYOUT: sidebar + main -->
+  <div class="h-screen grid grid-cols-[280px_1fr]">
+
+    <!-- SIDEBAR -->
+    <aside class="bg-zinc-950/95 text-zinc-100 border-r border-zinc-800 flex flex-col">
+      <!-- Conexión compacta + estado -->
+      <div class="p-4 border-b border-zinc-800">
+        <h2 class="text-sm font-semibold mb-2">TikTok LIVE</h2>
+        <div class="flex items-center gap-2">
+          <span id="statusPill" class="inline-flex items-center gap-2 rounded-full px-2 py-1 bg-zinc-900 border border-zinc-800 text-[11px]">
+            <span id="statusLed" class="inline-block size-2 rounded-full bg-zinc-400"></span>
+            <span id="statusText" class="text-zinc-300">Desconectado</span>
+          </span>
+        </div>
+        <div class="mt-3 space-y-2">
+          <input id="username" type="text" placeholder="Usuario de TikTok"
+                 class="w-full rounded-xl border border-zinc-700 bg-transparent px-3 py-2 text-sm" />
+          <div class="flex gap-2">
+            <button id="connectBtn" class="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm">Conectar</button>
+            <button id="disconnectBtn" class="flex-1 rounded-xl bg-rose-600/70 hover:bg-rose-700 text-white px-3 py-2 text-sm" disabled>Desconectar</button>
+          </div>
+          <p class="text-[11px] text-zinc-500">Tip: usa el usuario sin @.</p>
+        </div>
+      </div>
+
+      <!-- NAV -->
+      <nav id="sideNav" class="p-2 text-sm select-none">
+        <a href="#inicio"    class="navlink block px-3 py-2 rounded-lg hover:bg-zinc-800">Inicio</a>
+        <a href="#acciones"  class="navlink block px-3 py-2 rounded-lg hover:bg-zinc-800">Acciones y Eventos</a>
+        <a href="#overlays"  class="navlink block px-3 py-2 rounded-lg hover:bg-zinc-800">Overlays</a>
+        <a href="#tts"       class="navlink block px-3 py-2 rounded-lg hover:bg-zinc-800">TTS Chat</a>
+      </nav>
+
+      <div class="mt-auto p-3 text-[11px] text-zinc-500">
+        <div class="flex items-center gap-2">
+          <button id="exportBtn" class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800">Exportar</button>
+          <label class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 cursor-pointer text-center">
+            Importar <input id="importInput" type="file" accept="application/json" class="hidden">
+          </label>
+        </div>
+        <div class="mt-2">v1.0 • Español By Gasky ❤</div>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="overflow-y-auto">
+      <header class="sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-zinc-100/60 dark:supports-[backdrop-filter]:bg-zinc-950/60 border-b border-zinc-200/30 dark:border-zinc-800">
+        <div class="max-w-7xl mx-auto px-4 py-3">
+          <h1 id="pageTitle" class="text-lg md:text-xl font-semibold tracking-tight">Inicio</h1>
+          <p class="text-xs text-zinc-500">Conecta tu live con juegos, webhooks y comandos de Minecraft.</p>
+        </div>
+        <div class="flex items-center gap-2">
+  <select id="profileSel" class="rounded-xl border px-3 py-1.5"></select>
+  <button id="profileAdd" class="rounded-lg bg-zinc-700 text-white px-2 py-1 text-xs">Nuevo</button>
+  <button id="profileDup" class="rounded-lg bg-zinc-700 text-white px-2 py-1 text-xs">Duplicar</button>
+  <button id="profileDel" class="rounded-lg bg-rose-600 text-white px-2 py-1 text-xs">Eliminar</button>
+</div>
+<script>
+async function modalPrompt({ title='Título', label='Texto', placeholder='', defaultValue='' } = {}) {
+  const dlg = document.getElementById('textPromptDialog');
+  const t = document.getElementById('tpTitle');
+  const l = document.getElementById('tpLabel');
+  const input = document.getElementById('tpInput');
+  const ok = document.getElementById('tpOk');
+  const cancel = document.getElementById('tpCancel');
+
+  t.textContent = title;
+  l.textContent = label;
+  input.value = defaultValue || '';
+  input.placeholder = placeholder || '';
+  return new Promise(resolve => {
+    const cleanup = () => {
+      ok.onclick = cancel.onclick = null;
+      dlg.close();
+    };
+    ok.onclick = (e) => { e.preventDefault(); const v = input.value.trim(); cleanup(); resolve(v || null); };
+    cancel.onclick = (e) => { e.preventDefault(); cleanup(); resolve(null); };
+    dlg.showModal();
+    setTimeout(() => input.focus(), 0);
+  });
+}
+
+async function modalConfirm({ title='Confirmar', message='¿Seguro?' } = {}) {
+  const dlg = document.getElementById('confirmDialog');
+  const t = document.getElementById('cfTitle');
+  const m = document.getElementById('cfMsg');
+  const ok = document.getElementById('cfOk');
+  const cancel = document.getElementById('cfCancel');
+
+  t.textContent = title;
+  m.textContent = message;
+  return new Promise(resolve => {
+    const cleanup = () => {
+      ok.onclick = cancel.onclick = null;
+      dlg.close();
+    };
+    ok.onclick = (e) => { e.preventDefault(); cleanup(); resolve(true); };
+    cancel.onclick = (e) => { e.preventDefault(); cleanup(); resolve(false); };
+    dlg.showModal();
+  });
+}
+</script>
+
+<script>
+(async function profilesUI(){
+  const sel = document.getElementById('profileSel');
+  const add = document.getElementById('profileAdd');
+  const dup = document.getElementById('profileDup');
+  const del = document.getElementById('profileDel');
+
+  async function refresh(){
+    const s = await fetch('/profiles').then(r=>r.json());
+    sel.innerHTML = '';
+    (s.list||[]).forEach(p=>{
+      const opt = document.createElement('option');
+      opt.value = p.id; opt.textContent = p.name + (p.id===s.active ? ' ✓' : '');
+      if (p.id===s.active) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+
+  sel.addEventListener('change', async ()=>{
+    await fetch('/profiles/switch', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body:JSON.stringify({ id: sel.value }) 
+    });
+    location.reload();
+  });
+
+  add.addEventListener('click', async ()=>{
+    const name = await modalPrompt({
+      title: 'Nuevo perfil',
+      label: 'Nombre del nuevo perfil',
+      placeholder: 'Mi perfil'
+    });
+    if (!name) return;
+    await fetch('/profiles/create', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body:JSON.stringify({ name }) 
+    });
+    refresh();
+  });
+
+  dup.addEventListener('click', async ()=>{
+    const name = await modalPrompt({
+      title: 'Duplicar perfil',
+      label: 'Nombre del perfil duplicado',
+      placeholder: 'Copia de…'
+    });
+    if (!name) return;
+    const exp = await fetch('/profiles/export').then(r=>r.json());
+    exp.pkg.id = name.toLowerCase().replace(/[^a-z0-9\-]+/g,'-');
+    exp.pkg.meta = { name };
+    await fetch('/profiles/import', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify({ pkg: exp.pkg }) 
+    });
+    refresh();
+  });
+
+  del.addEventListener('click', async ()=>{
+    const id = sel.value;
+    const label = sel.options[sel.selectedIndex]?.textContent?.replace(' ✓','') || id;
+    const ok = await modalConfirm({ 
+      title:'Eliminar perfil', 
+      message:`¿Eliminar el perfil "${label}"? (no se borran archivos físicos)` 
+    });
+    if (!ok) return;
+    await fetch('/profiles/delete', { 
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body:JSON.stringify({ id }) 
+    });
+    refresh();
+  });
+
+  refresh();
+})();
+</script>
+
+
+      </header>
+      
+
+      <div id="appRoot" class="max-w-7xl mx-auto p-4 md:p-6 lg:p-8" style="opacity:0.25; pointer-events:none;">
+        <!-- PAGE: INICIO -->
+        <section data-page="inicio" class="space-y-6">
+          <!-- Top Gift -->
+          
+
+          <!-- Logs -->
+          <section class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+            <div class="flex items-center justify-between">
+              <h2 class="font-semibold">Logs</h2>
+              <div class="flex items-center gap-2">
+                <button id="clearLogBtn" class="rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-2 text-sm">Limpiar</button>
+                <label class="text-xs text-zinc-500 flex items-center gap-2">
+                  <input id="pauseLogChk" type="checkbox" class="rounded">
+                  Pausar
+                </label>
+                <label class="text-xs text-zinc-500 flex items-center gap-2">
+                  <input id="autoScrollChk" type="checkbox" class="rounded" checked>
+                  Autoscroll
+                </label>
+              </div>
+            </div>
+            <div id="log" class="mt-3 h-64 overflow-y-auto rounded-xl bg-zinc-100 dark:bg-zinc-950/40 p-3 text-xs font-mono"></div>
+          </section>
+
+                    <!-- Configuración de ServerTap -->
+          <section class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+            <h2 class="font-semibold">ServerTap (Minecraft)</h2>
+            <p class="text-sm text-zinc-500">Define a qué IP/host y puerto se enviarán los comandos.</p>
+
+            <div class="mt-4 grid grid-cols-1 sm:grid-cols-[1fr_140px_auto] gap-3 items-end">
+              <div>
+                <label class="text-xs text-zinc-500 block mb-1">IP o Host</label>
+                <input id="stHost" type="text" placeholder="ej: 123.45.67.89 o midominio.com"
+                      class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="text-xs text-zinc-500 block mb-1">Puerto</label>
+                <input id="stPort" type="number" min="1" max="65535" placeholder="4570"
+                      class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm" />
+              </div>
+              <div class="flex gap-2">
+                <button id="stSaveBtn" class="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm">Guardar</button>
+                <button id="stClearBtn" class="rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-4 py-2 text-sm">Usar localhost</button>
+              </div>
+            </div>
+
+            <p id="stNote" class="mt-2 text-xs text-zinc-500">Actual: se usará esta dirección para enviar <code>/v1/server/exec</code>.</p>
+          </section>
+
+
+          <!-- Catálogo (plegable) -->
+          <section class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+            <details id="catalogDetails">
+              <summary class="cursor-pointer select-none font-semibold">Catálogo de regalos (click para abrir/cerrar)</summary>
+              <div id="giftCatalog" class="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3"></div>
+            </details>
+          </section>
+        </section>
+
+        <!-- PAGE: ACCIONES Y EVENTOS -->
+        <section data-page="acciones" class="hidden space-y-6">
+          <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+            <div class="flex flex-wrap items-center gap-2 justify-between">
+  <div>
+    <h2 class="font-semibold">Eventos (Webhooks / Teclas / Minecraft)</h2>
+    <p class="text-sm text-zinc-500">Configura acciones por regalo del catálogo.</p>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <div class="relative">
+      <input id="searchInput" type="search" placeholder="Buscar…"
+        class="w-56 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 pr-8" />
+      <svg class="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 opacity-50" viewBox="0 0 20 20" fill="currentColor"><path d="M8 2a6 6 0 104.472 10.03l3.249 3.249 1.414-1.414-3.25-3.249A6 6 0 008 2z"/></svg>
+    </div>
+
+    <!-- Split button -->
+    <div class="relative">
+      <div class="inline-flex rounded-xl overflow-hidden border border-zinc-300 dark:border-zinc-700">
+        <button id="addRowBtn" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm">Añadir evento</button>
+        <button id="addMenuBtn" class="px-2 py-2 bg-blue-600/90 hover:bg-blue-700 text-white">
+          <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M5 7l5 5 5-5"/></svg>
+        </button>
+      </div>
+      <div id="addMenu" class="hidden absolute right-0 mt-1 w-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow">
+        <button id="addFollowRuleBtn" class="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">Añadir evento Seguidores</button>
+        <button id="addLikesRuleBtn"  class="w-full text-left px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">Añadir evento Likes…</button>
+      </div>
+    </div>
+
+    <button id="saveAllBtn" class="rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-2">Guardar</button>
+
+    <label class="ml-1 text-xs inline-flex items-center gap-2">
+      <input id="denseToggle" type="checkbox" class="rounded"> Modo denso
+    </label>
+  </div>
+</div>
+
+
+            <div class="mt-4 overflow-x-auto">
+  <table id="eventsTable" class="w-full text-sm table-events">
+    <thead class="text-left">
+      <tr class="border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
+        <th class="py-2 pr-3 w-[120px]">Acciones</th>
+        <th class="py-2 pr-3">Regalo</th>
+        <th class="py-2 pr-3">Acción</th>
+        <th class="py-2 pr-3 w-[70px]">Rep.</th>
+      </tr>
+    </thead>
+    <tbody id="webhookBody"></tbody>
+  </table>
+</div>
+
+          </div>
+        </section>
+
+        <!-- PAGE: OVERLAYS -->
+        <section data-page="overlays" class="hidden space-y-6">
+  <!-- Top Gift -->
+  <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+    <h3 class="font-semibold">Top Gift</h3>
+    <div id="topGift" class="mt-4 flex items-center gap-4">
+      <img id="topGiftImg" src="" alt="Gift" class="size-16 rounded-xl object-cover bg-zinc-200 dark:bg-zinc-800 hidden">
+      <div>
+        <p class="text-sm text-zinc-500">Regalo</p>
+        <p id="topGiftName" class="text-lg font-semibold">—</p>
+        <p id="topGiftUser" class="text-sm text-zinc-400">—</p>
+      </div>
+      <div class="ml-auto text-right">
+        <p class="text-sm text-zinc-500">Diamantes</p>
+        <p id="topGiftDiamonds" class="text-2xl font-bold">0</p>
+      </div>
+    </div>
+    <!-- Link para copiar -->
+    <button onclick="copyLink('http://localhost:3000/topgift.html')" 
+      class="mt-4 text-xs text-emerald-600 hover:underline">
+      Copiar link para OBS/TikTok Live Studio
+    </button>
+  </div>
+
+  <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow space-y-3">
+  <h3 class="font-semibold">Wins (overlay)</h3>
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Título</span>
+      <input id="wTitle" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="WINS">
+    </label>
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Color (hex)</span>
+      <input id="wAccent" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="#22c55e">
+    </label>
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Hotkey +1</span>
+      <input id="hkInc" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="CommandOrControl+Up">
+    </label>
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Hotkey -1</span>
+      <input id="hkDec" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="CommandOrControl+Down">
+    </label>
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Hotkey Reset</span>
+      <input id="hkReset" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="CommandOrControl+Alt+0">
+    </label>
+    <div class="flex items-end gap-2">
+      <button id="wPlus"  class="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 text-sm">+1</button>
+      <button id="wMinus" class="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 text-sm">-1</button>
+      <button id="wReset" class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-2 text-sm">Reset</button>
+    </div>
+    <div class="flex items-end">
+      <button id="wSave" class="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-sm">Guardar</button>
+    </div>
+    <div class="flex items-end">
+      <button class="text-xs text-emerald-600 hover:underline" onclick="copyLink('http://localhost:3000/overlay-wins.html?title=WINS&accent=%2322c55e')">Copiar link overlay de Wins</button>
+    </div>
+  </div>
+  <p class="text-sm text-zinc-500">Actual: <span id="wNow" class="font-semibold">0</span></p>
+</div>
+
+<script>
+(async function winsUI(){
+  const $ = s => document.querySelector(s);
+  const socket = io();
+
+  async function load(){
+    const st = await (await fetch('/getWins')).json();
+    $('#wTitle').value  = st.title || 'WINS';
+    $('#wAccent').value = st.accent || '#22c55e';
+    $('#wNow').textContent = st.wins ?? 0;
+
+    // hotkeys desde prefs
+    try {
+      const prefs = await (await fetch('/getPrefs')).json();
+      const hk = prefs.winsHotkeys || {};
+      $('#hkInc').value = hk.inc || 'CommandOrControl+Alt+Up';
+      $('#hkDec').value = hk.dec || 'CommandOrControl+Alt+Down';
+      $('#hkReset').value = hk.reset || 'CommandOrControl+Alt+0';
+    } catch {}
+  }
+
+  function postWins(body){ return fetch('/setWins', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); }
+
+  $('#wPlus') .addEventListener('click', ()=> postWins({ action:'inc'   }));
+  $('#wMinus').addEventListener('click', ()=> postWins({ action:'dec'   }));
+  $('#wReset').addEventListener('click', ()=> postWins({ action:'reset' }));
+
+  $('#wSave').addEventListener('click', async ()=>{
+    await postWins({ config:{ title: $('#wTitle').value || 'WINS', accent: $('#wAccent').value || '#22c55e' }});
+    // guarda hotkeys en prefs
+    const body = { winsHotkeys: {
+      inc: $('#hkInc').value || 'CommandOrControl+Alt+Up',
+      dec: $('#hkDec').value || 'CommandOrControl+Alt+Down',
+      reset: $('#hkReset').value || 'CommandOrControl+Alt+0'
+    }};
+    await fetch('/setPrefs', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+
+    // pide al main re-registrar hotkeys
+    try { window.electron?.ipcRenderer?.invoke('winsHotkeys:update'); } catch {}
+    toast('✅ Wins y hotkeys guardados');
+  });
+
+  socket.on('wins', st => { $('#wNow').textContent = st.wins ?? 0; });
+
+  load();
+})();
+</script>
+
+
+
+<div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow space-y-3">
+  <h3 class="font-semibold">Guerra de regalos</h3>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- LADO IZQUIERDO -->
+    <div>
+      <label class="text-xs text-zinc-500">Título izquierda</label>
+      <input id="gbTitleL" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="Me reinicias">
+      <div class="grid grid-cols-3 gap-2 mt-2">
+        <div id="ddL1" class="gift-dd"></div>
+        <div id="ddL2" class="gift-dd"></div>
+        <div id="ddL3" class="gift-dd"></div>
+      </div>
+    </div>
+
+    <!-- LADO DERECHO -->
+    <div>
+      <label class="text-xs text-zinc-500">Título derecha</label>
+      <input id="gbTitleR" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="Me salvas">
+      <div class="grid grid-cols-3 gap-2 mt-2">
+        <div id="ddR1" class="gift-dd"></div>
+        <div id="ddR2" class="gift-dd"></div>
+        <div id="ddR3" class="gift-dd"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Opciones base -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <label class="text-sm"><span class="block text-xs text-zinc-500 mb-1">Puntos por coin</span>
+      <input id="gbPPC" type="number" step="0.1" min="0" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="1">
+    </label>
+    <label class="text-sm"><span class="block text-xs text-zinc-500 mb-1">Cuenta atrás (s)</span>
+      <input id="gbCD" type="number" min="3" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="10">
+    </label>
+    <label class="text-sm inline-flex items-center gap-2 mt-6">
+      <input id="gbAuto" type="checkbox" class="rounded"> Auto-reset al ganar
+    </label>
+  </div>
+
+  <!-- NUEVO: modo e intervalo -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <label class="text-sm"><span class="block text-xs text-zinc-500 mb-1">Mostrar regalos</span>
+      <select id="gbMode" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2">
+        <option value="grid">3 fijos (arriba)</option>
+        <option value="rotate">Rotar con efecto</option>
+      </select>
+    </label>
+    <label class="text-sm"><span class="block text-xs text-zinc-500 mb-1">Intervalo rotación (ms)</span>
+      <input id="gbInterval" type="number" min="400" step="100" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="1200">
+    </label>
+  </div>
+
+  <div class="flex gap-2">
+    <button id="gbSave" class="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-sm">Guardar</button>
+    <button id="gbReset" class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-sm">Reset puntajes</button>
+
+    <button class="ml-auto text-xs text-emerald-600 hover:underline"
+            onclick="copyLink('http://localhost:3000/overlay-battle.html?left=%23ef4444&right=%2360a5fa&rounded=20')">
+      Copiar link overlay de Guerra
+    </button>
+
+    <button class="text-xs text-emerald-600 hover:underline"
+            onclick="copyLink('http://localhost:3000/overlay-battle-v2.html?left=%23ef4444&right=%2360a5fa&accent=%23f59e0b&rounded=20&cd=10&tile=140')">
+      Copiar link overlay de Guerra (v2)
+    </button>
+  </div>
+</div>
+
+<script>
+/* ========= Dropdown con imagen + buscador (reutilizable) ========= */
+function buildGiftDropdown(rootId, catalog, selectedId) {
+  const root = document.getElementById(rootId);
+  root.innerHTML = `
+    <div class="relative">
+      <button type="button"
+        class="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-1 flex items-center gap-2 giftBtn">
+        <img class="w-6 h-6 rounded bg-zinc-200 dark:bg-zinc-700 thumb hidden" alt="">
+        <span class="flex-1 truncate label">— Selecciona un regalo —</span>
+        <svg class="w-4 h-4 opacity-60" viewBox="0 0 20 20"><path d="M5 7l5 5 5-5" fill="currentColor"/></svg>
+      </button>
+      <div class="menu absolute z-10 mt-1 w-full hidden rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow">
+        <input type="search" placeholder="Buscar..."
+          class="w-full mb-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm search" />
+        <div class="list max-h-64 overflow-y-auto space-y-1"></div>
+      </div>
+      <input type="hidden" class="value">
+    </div>
+  `;
+
+  const btn   = root.querySelector('.giftBtn');
+  const menu  = root.querySelector('.menu');
+  const search= root.querySelector('.search');
+  const list  = root.querySelector('.list');
+  const label = root.querySelector('.label');
+  const thumb = root.querySelector('.thumb');
+  const value = root.querySelector('.value');
+
+  function setSelected(id){
+    value.value = id || '';
+    if (id && catalog[id]) {
+      const g = catalog[id];
+      label.textContent = `${g.name} — ${(g.diamondCount||0)}💎 (ID ${id})`;
+      if (g.image) { thumb.src = g.image; thumb.classList.remove('hidden'); }
+      else { thumb.classList.add('hidden'); }
+    } else {
+      label.textContent = '— Selecciona un regalo —';
+      thumb.classList.add('hidden');
+    }
+  }
+
+  function renderList(q=''){
+    const ql = q.toLowerCase();
+    list.innerHTML = '';
+    for (const [id, g] of sortedEntriesByPrice(catalog)) {
+      const txt = `${g.name} ${id} ${g.diamondCount||0}`.toLowerCase();
+      if (q && !txt.includes(ql)) continue;
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'w-full px-2 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 text-left';
+      row.innerHTML = `
+        <img src="${g.image||''}" class="w-6 h-6 rounded bg-zinc-200 dark:bg-zinc-700 ${g.image?'':'hidden'}" alt="">
+        <span class="flex-1 truncate">${g.name}</span>
+        <span class="text-xs text-zinc-500">${g.diamondCount||0}💎 • ID ${id}</span>
+      `;
+      row.addEventListener('click', ()=>{ setSelected(id); menu.classList.add('hidden'); });
+      list.appendChild(row);
+    }
+  }
+
+  btn.addEventListener('click', (e)=>{ e.stopPropagation();
+    menu.classList.toggle('hidden');
+    if (!menu.classList.contains('hidden')) { search.value=''; renderList(''); }
+  });
+  document.addEventListener('click', (e)=>{ if(!root.contains(e.target)) menu.classList.add('hidden'); });
+  search.addEventListener('input', e=> renderList(e.target.value));
+
+  setSelected(selectedId); // inicial
+  return {
+    get value(){ return value.value; },
+    set value(v){ setSelected(v); }
+  };
+}
+
+/* =================== UI de Guerra de regalos =================== */
+(async function giftBattleUI(){
+  const S = sel => document.querySelector(sel);
+  let dd = {}; // instancias de los 6 dropdowns
+
+  async function load(){
+    const [state, catalog] = await Promise.all([
+      fetch('/getGiftBattle').then(r=>r.json()).catch(()=>({})),
+      fetch('/getGiftCatalog').then(r=>r.json()).catch(()=>({}))
+    ]);
+
+    S('#gbTitleL').value = state.titleLeft || '';
+    S('#gbTitleR').value = state.titleRight || '';
+    S('#gbPPC').value    = state.pointsPerCoin ?? 1;
+    S('#gbCD').value     = state.leadCountdown ?? 10;
+    S('#gbAuto').checked = !!state.autoResetOnWin;
+
+    // 👇 NUEVO: cargar preferencias de visualización
+    S('#gbMode').value      = state.display?.mode || 'grid';
+    S('#gbInterval').value  = state.display?.intervalMs ?? 1200;
+
+    const L = state.left?.gifts || [], R = state.right?.gifts || [];
+
+    // Construir los 6 dropdowns con el catálogo y selección inicial
+    dd.L1 = buildGiftDropdown('ddL1', catalog, L[0]);
+    dd.L2 = buildGiftDropdown('ddL2', catalog, L[1]);
+    dd.L3 = buildGiftDropdown('ddL3', catalog, L[2]);
+    dd.R1 = buildGiftDropdown('ddR1', catalog, R[0]);
+    dd.R2 = buildGiftDropdown('ddR2', catalog, R[1]);
+    dd.R3 = buildGiftDropdown('ddR3', catalog, R[2]);
+  }
+
+  function post(body){
+    return fetch('/setGiftBattle', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+  }
+
+  // Guardar configuración recogiendo los valores de los dropdowns
+  S('#gbSave').addEventListener('click', ()=> post({ config:{
+    titleLeft:  S('#gbTitleL').value || 'Me reinicias',
+    titleRight: S('#gbTitleR').value || 'Me salvas',
+    leftGifts:  [dd.L1?.value, dd.L2?.value, dd.L3?.value].filter(Boolean),
+    rightGifts: [dd.R1?.value, dd.R2?.value, dd.R3?.value].filter(Boolean),
+    pointsPerCoin: parseFloat(S('#gbPPC').value || '1') || 0,
+    leadCountdown: parseInt(S('#gbCD').value || '10', 10) || 10,
+    autoResetOnWin: S('#gbAuto').checked,
+
+    // 👇 NUEVO: enviar preferencias de visualización
+    display: {
+      mode: S('#gbMode').value === 'rotate' ? 'rotate' : 'grid',
+      intervalMs: parseInt(S('#gbInterval').value || '1200', 10) || 1200
+    }
+  }}));
+
+  S('#gbReset').addEventListener('click', ()=> post({ action:'reset' }));
+
+  load();
+})();
+</script>
+
+
+<div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow space-y-3">
+  <h3 class="font-semibold">Top Monedas (overlay)</h3>
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Título</span>
+      <input id="cbTitle" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="Top Monedas">
+    </label>
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Mostrar Top N</span>
+      <input id="cbTopN" type="number" min="3" max="50" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2" placeholder="10">
+    </label>
+    <label class="text-sm inline-flex items-center gap-2 mt-6">
+      <input id="cbResetOnDisc" type="checkbox" class="rounded"> Reset al desconectar
+    </label>
+  </div>
+  <div class="flex gap-2">
+    <button id="cbSave" class="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-sm">Guardar</button>
+    <button id="cbReset" class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-sm">Reset</button>
+    <button class="ml-auto text-xs text-emerald-600 hover:underline" onclick="copyLink('http://localhost:3000/overlay-coins.html')">
+      Copiar link overlay de Top Monedas
+    </button>
+  </div>
+</div>
+
+<script>
+(async function coinBoardControls(){
+  function post(body){ return fetch('/setCoinBoard', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); }
+  try {
+    const st = await (await fetch('/getCoinBoard')).json();
+    document.getElementById('cbTitle').value = st.title ?? 'Top Monedas';
+    document.getElementById('cbTopN').value = st.topN ?? 10;
+    document.getElementById('cbResetOnDisc').checked = !!st.resetOnDisconnect;
+  } catch {}
+  document.getElementById('cbSave').addEventListener('click', () => post({ config:{
+    title: document.getElementById('cbTitle').value || 'Top Monedas',
+    topN: parseInt(document.getElementById('cbTopN').value || '10', 10) || 10,
+    resetOnDisconnect: document.getElementById('cbResetOnDisc').checked
+  }}));
+  document.getElementById('cbReset').addEventListener('click', () => post({ action:'reset' }));
+})();
+</script>
+
+
+
+  <!-- Metas del Live -->
+  <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow space-y-5">
+    <h3 class="font-semibold">Metas del Live</h3>
+
+    <!-- Likes -->
+    <div>
+      <div class="flex items-center justify-between text-sm">
+        <span>Likes</span>
+        <span id="likesLabel" class="text-zinc-500">0 / 0</span>
+      </div>
+      <div class="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mt-2">
+        <div id="likesBar" class="h-2 bg-emerald-500" style="width:0%"></div>
+      </div>
+      <div class="mt-2 flex items-center gap-2">
+        <input id="likesTarget" type="number" min="1" class="w-24 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-1 text-sm" placeholder="Meta">
+        <button id="likesSet" class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-2 py-1 text-xs">Fijar meta</button>
+        <button id="likesReset" class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-2 py-1 text-xs">Reiniciar</button>
+      </div>
+      <!-- Link para copiar -->
+      <button onclick="copyLink('http://localhost:3000/overlay-goals.html?metric=likes&title=Vamos%20con%20todo!&accent=#a855f7&rounded=20')" 
+        class="mt-3 text-xs text-emerald-600 hover:underline">
+        Copiar link para OBS/TikTok Live Studio
+      </button>
+    </div>
+
+    <!-- Seguidores -->
+    <div>
+      <div class="flex items-center justify-between text-sm">
+        <span>Seguidores</span>
+        <span id="followsLabel" class="text-zinc-500">0 / 0</span>
+      </div>
+      <div class="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden mt-2">
+        <div id="followsBar" class="h-2 bg-blue-500" style="width:0%"></div>
+      </div>
+      <div class="mt-2 flex items-center gap-2">
+        <input id="followsTarget" type="number" min="1" class="w-24 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-1 text-sm" placeholder="Meta">
+        <button id="followsSet" class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-2 py-1 text-xs">Fijar meta</button>
+        <button id="followsReset" class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-2 py-1 text-xs">Reiniciar</button>
+      </div>
+      <!-- Link para copiar -->
+      <button onclick="copyLink('http://localhost:3000/overlay-goals.html?metric=followers&title=Vamos%20con%20todo!&accent=#a855f7&rounded=20')" 
+        class="mt-3 text-xs text-emerald-600 hover:underline">
+        Copiar link para OBS/TikTok Live Studio
+      </button>
+    </div>
+  </div>
+<div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow space-y-3">
+  <h3 class="font-semibold">Cuenta atrás extensible</h3>
+
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Segundos por moneda</span>
+      <input id="cdSecPerCoin" type="number" min="0" step="0.1"
+             class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"
+             placeholder="1">
+    </label>
+
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Título</span>
+      <input id="cdTitle" type="text" maxlength="120"
+             class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"
+             placeholder="Tiempo restante">
+    </label>
+
+    <label class="text-sm">
+      <span class="block text-xs text-zinc-500 mb-1">Tope (0 = sin límite)</span>
+      <input id="cdMax" type="number" min="0"
+             class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"
+             placeholder="0">
+    </label>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2">
+    <button id="cdStart"
+            class="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-sm">Iniciar</button>
+    <button id="cdPause"
+            class="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 text-sm">Pausar</button>
+    <button id="cdReset"
+            class="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-sm">Reiniciar</button>
+    <button id="cdAdd60"
+            class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-sm">+60s</button>
+
+    <!-- NUEVO: tiempo inicial -->
+    <input id="cdHMS" type="text" placeholder="HH:MM:SS"
+           class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-sm"
+           style="width:120px">
+    <button id="cdSet"
+            class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-sm">Fijar tiempo</button>
+    <button id="cdStartAt"
+            class="rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm">Fijar e iniciar</button>
+
+    <label class="inline-flex items-center gap-2 text-sm ml-auto">
+      <input id="cdEnabled" type="checkbox" class="rounded"> Extensible activo
+    </label>
+  </div>
+
+  <button onclick="copyLink('http://localhost:3000/overlay-countdown.html?accent=%23a855f7&rounded=20')"
+          class="text-xs text-emerald-600 hover:underline">
+    Copiar link overlay de cuenta atrás
+  </button>
+</div>
+
+<script>
+(async function setupCountdownControls(){
+  // carga inicial
+  try{
+    const s = await (await fetch('/getCountdown')).json();
+    document.getElementById('cdSecPerCoin').value = s.secondsPerCoin ?? 1;
+    document.getElementById('cdTitle').value = s.title ?? 'Tiempo restante';
+    document.getElementById('cdMax').value = s.maxSeconds ?? 0;
+    document.getElementById('cdEnabled').checked = !!s.enabled;
+  }catch{}
+
+  function post(body){
+    return fetch('/setCountdown', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+  }
+
+  // Controles básicos
+  document.getElementById('cdStart').addEventListener('click', ()=> post({ action:'start' }));
+  document.getElementById('cdPause').addEventListener('click', ()=> post({ action:'pause' }));
+  document.getElementById('cdReset').addEventListener('click', ()=> post({ action:'reset' }));
+  document.getElementById('cdAdd60').addEventListener('click', ()=> post({ action:'add', seconds:60 }));
+
+  // Guardar configuración
+  const saveCfg = () => post({ config:{
+    secondsPerCoin: parseFloat(document.getElementById('cdSecPerCoin').value || '0') || 0,
+    title: document.getElementById('cdTitle').value || 'Tiempo restante',
+    maxSeconds: parseInt(document.getElementById('cdMax').value || '0', 10) || 0,
+    enabled: document.getElementById('cdEnabled').checked
+  }});
+  document.getElementById('cdSecPerCoin').addEventListener('change', saveCfg);
+  document.getElementById('cdTitle').addEventListener('change', saveCfg);
+  document.getElementById('cdMax').addEventListener('change', saveCfg);
+  document.getElementById('cdEnabled').addEventListener('change', saveCfg);
+
+  // ---- NUEVO: HH:MM:SS -> segundos y acciones set/startAt ----
+  function hmsToSeconds(hms){
+    const str = String(hms || '').trim();
+    if (!str) return 0;
+    const parts = str.split(':').map(x => parseInt(x,10) || 0);
+    if (parts.length === 1) return Math.max(0, parts[0]);            // "90"
+    if (parts.length === 2) { const [m,s]=parts; return Math.max(0, m*60 + s); } // "MM:SS"
+    const [h,m,s] = parts;                                            // "HH:MM:SS"
+    return Math.max(0, h*3600 + m*60 + s);
+  }
+
+  document.getElementById('cdSet').addEventListener('click', () => {
+    const secs = hmsToSeconds(document.getElementById('cdHMS').value);
+    post({ action:'set', seconds: secs });
+  });
+
+  document.getElementById('cdStartAt').addEventListener('click', () => {
+    const secs = hmsToSeconds(document.getElementById('cdHMS').value);
+    post({ action:'startAt', seconds: secs });
+  });
+})();
+</script>
+
+
+
+
+
+
+
+
+
+
+
+</section>
+
+<script>
+function copyLink(link) {
+  navigator.clipboard.writeText(link).then(() => {
+    toast("✅ Link copiado al portapapeles:\n" + link);
+  });
+}
+</script>
+
+
+        <!-- PAGE: TTS CHAT -->
+        <section data-page="tts" class="hidden space-y-6">
+          <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow">
+            <h2 class="font-semibold">Chat por voz (TTS)</h2>
+            <p class="text-sm text-zinc-500">Leer en voz alta mensajes destacados del chat.</p>
+            <div class="mt-4 flex items-center gap-3">
+              <label class="inline-flex items-center gap-2 text-sm">
+                <input id="ttsEnabled" type="checkbox" class="rounded">
+                Activar TTS
+              </label>
+              <select id="ttsVoice" class="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-sm">
+                <option value="default">Voz del sistema</option>
+              </select>
+            </div>
+            <p class="text-xs text-zinc-500 mt-2">El servidor respeta este ajuste cuando llegan mensajes de chat.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Añadir Evento -->
+  <dialog id="eventModal" class="rounded-2xl p-0 w-full max-w-lg bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+    <form method="dialog">
+      <div class="p-5 border-b border-zinc-200 dark:border-zinc-800">
+        <h3 class="text-lg font-semibold">Nuevo evento</h3>
+        <p class="text-xs text-zinc-500 mt-1">Elige un regalo del catálogo y las acciones a ejecutar.</p>
+      </div>
+      <div class="p-5 space-y-4">
+        <div>
+          <label class="text-sm block mb-1">Regalo</label>
+          <div class="relative">
+            <button id="giftPickerBtn" type="button" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 flex items-center gap-2">
+              <img id="giftPickerThumb" class="w-6 h-6 rounded bg-zinc-200 dark:bg-zinc-800 hidden" alt="">
+              <span id="giftPickerLabel" class="truncate text-left flex-1">— Selecciona un regalo —</span>
+              <svg class="w-4 h-4 opacity-60" viewBox="0 0 20 20"><path d="M5 7l5 5 5-5" fill="currentColor"/></svg>
+            </button>
+            <div id="giftPickerMenu" class="absolute z-10 mt-1 w-full hidden rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow">
+              <input id="giftPickerSearch" type="search" placeholder="Buscar..." class="w-full mb-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm" />
+              <div id="giftPickerList" class="max-h-64 overflow-y-auto space-y-1"></div>
+            </div>
+          </div>
+          <input type="hidden" id="selectedGiftId" />
+        </div>
+
+        <div class="space-y-3">
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="chkWebhook" class="rounded"> Webhook HTTP
+          </label>
+          <div id="wrapWebhook" class="hidden">
+            <input id="modalWebhook" type="url" placeholder="https://mi-webhook.com/evento" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+          </div>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="chkKey" class="rounded"> Pulsación de tecla
+          </label>
+          <div id="wrapKey" class="hidden">
+            <input id="modalKey" type="text" placeholder="ej: space, enter, a" class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+            <p class="text-xs text-zinc-500 mt-1">Admitidas: letras, 0-9, enter, space, esc, up/down/left/right.</p>
+          </div>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="chkMC" class="rounded"> Comando de Minecraft
+          </label>
+                    <div id="wrapMC" class="hidden">
+            <input id="modalMC" type="text" placeholder='ej: say ¡Hola TikTok!' class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+            <p class="text-xs text-zinc-500 mt-1">Usa ServerTap: <code>/v1/server/exec</code></p>
+          </div>
+          <label class="flex items-center gap-2 text-sm">
+  <input type="checkbox" id="chkSound" class="rounded"> Sonido
+</label>
+<div id="wrapSound" class="hidden">
+  <div class="flex items-center gap-2">
+    <input id="modalSound" type="url" placeholder="URL MP3/OGG (o usa la librería)"
+           class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+    <button id="openSoundLib" type="button"
+            class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-2 text-sm">
+      Librería
+    </button>
+  </div>
+  <div class="flex items-center gap-2 mt-2">
+    <label class="text-xs text-zinc-500">Volumen</label>
+    <input id="modalSoundVol" type="range" min="0" max="1" step="0.05" value="1" />
+    <span id="modalSoundVolLbl" class="text-xs text-zinc-500">100%</span>
+  </div>
+</div>
+
+<!-- ✅ Video fuera del wrapSound -->
+<label class="flex items-center gap-2 text-sm mt-3">
+  <input type="checkbox" id="chkVideo" class="rounded"> Video (overlay)
+</label>
+<div id="wrapVideo" class="hidden">
+  <div class="flex items-center gap-2">
+    <input id="modalVideoUrl" type="url"
+           placeholder="Pega URL del video o sube uno"
+           class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+    <input id="modalVideoFile" type="file" accept="video/*" class="hidden">
+    <button id="modalVideoUpload" type="button"
+            class="rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-2 text-sm">
+      Subir
+    </button>
+  </div>
+  <div class="flex items-center gap-3 mt-2">
+    <label class="text-xs text-zinc-500">Volumen</label>
+    <input id="modalVideoVol" type="range" min="0" max="1" step="0.05" value="1" />
+    <span id="modalVideoVolLbl" class="text-xs text-zinc-500">100%</span>
+    <label class="text-xs inline-flex items-center gap-2 ml-2">
+      <input id="modalVideoLoop" type="checkbox" class="rounded"> loop
+    </label>
+  </div>
+</div>
+
+
+</div>
+
+
+        </div>
+
+        <div>
+          <label class="text-sm block mb-1">Repeticiones</label>
+          <input id="modalRepeat" type="number" min="1" max="100" value="1" class="w-32 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+          <p class="text-xs text-zinc-500 mt-1">Cuántas veces se dispara por cada unidad del regalo.</p>
+        </div>
+      </div>
+      <div class="p-5 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end gap-2">
+        <button id="modalCancel" class="rounded-xl px-4 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700">Cancelar</button>
+        <button id="modalAdd" class="rounded-xl px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white">Agregar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Sound Library -->
+<dialog id="soundLibModal" class="rounded-2xl p-0 w-full max-w-2xl bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+  <form method="dialog">
+    <div class="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+      <h3 class="text-lg font-semibold flex-1">Sound Library</h3>
+      <input id="slQuery" type="search" placeholder="Buscar en MyInstants…" class="w-72 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm" />
+      <button id="slSearchBtn" class="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 text-sm">Buscar</button>
+    </div>
+    <div class="p-5 max-h-[70vh] overflow-y-auto">
+      <div id="slResults" class="space-y-2"></div>
+      <p id="slHint" class="text-xs text-zinc-500 mt-2">Fuente: myinstants.com</p>
+    </div>
+    <div class="p-5 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end">
+      <button id="slClose" class="rounded-xl px-4 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700">Cerrar</button>
+    </div>
+  </form>
+</dialog>
+
+
+<!-- Mini diálogo: paso de likes -->
+<dialog id="likesStepDialog" class="rounded-2xl p-0 w-full max-w-sm bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+  <form method="dialog">
+    <div class="p-5 border-b border-zinc-200 dark:border-zinc-800">
+      <h3 class="text-lg font-semibold">Cada cuántos likes</h3>
+      <p class="text-xs text-zinc-500 mt-1">Define cada cuántos likes debe dispararse la acción.</p>
+    </div>
+    <div class="p-5 space-y-3">
+      <label class="text-sm block">Paso de likes</label>
+      <input id="likesStepInput" type="number" min="1" value="50"
+             class="w-28 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm"/>
+    </div>
+    <div class="p-5 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end gap-2">
+      <button id="likesStepCancel" class="rounded-xl px-4 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700">Cancelar</button>
+      <button id="likesStepOk" class="rounded-xl px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white">Continuar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Dialogo genérico: Prompt de texto -->
+<dialog id="textPromptDialog" class="rounded-2xl p-0 w-full max-w-sm bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+  <form method="dialog">
+    <div class="p-5 border-b border-zinc-200 dark:border-zinc-800">
+      <h3 id="tpTitle" class="text-lg font-semibold">Título</h3>
+      <label class="text-sm block mt-3">
+        <span id="tpLabel" class="block text-xs text-zinc-500 mb-1">Etiqueta</span>
+        <input id="tpInput" type="text"
+               class="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2"/>
+      </label>
+    </div>
+    <div class="p-5 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end gap-2">
+      <button id="tpCancel" type="button" class="rounded-xl px-4 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700">Cancelar</button>
+      <button id="tpOk" type="button" class="rounded-xl px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white">Aceptar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo genérico: Confirmación -->
+<dialog id="confirmDialog" class="rounded-2xl p-0 w-full max-w-sm bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+  <form method="dialog">
+    <div class="p-5 border-b border-zinc-200 dark:border-zinc-800">
+      <h3 id="cfTitle" class="text-lg font-semibold">¿Confirmar?</h3>
+      <p id="cfMsg" class="text-sm text-zinc-500 mt-1"></p>
+    </div>
+    <div class="p-5 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-end gap-2">
+      <button id="cfCancel" type="button" class="rounded-xl px-4 py-2 bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700">Cancelar</button>
+      <button id="cfOk" type="button" class="rounded-xl px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white">Sí, continuar</button>
+    </div>
+  </form>
+</dialog>
+
+
+
+  <template id="rowTemplate">
+  <tr class="events-row border-b border-zinc-200 dark:border-zinc-800">
+    <!-- Botones -->
+    <td class="py-2 pr-3 align-top">
+      <div class="flex items-center gap-2">
+        <button class="testBtn icon-btn icon-green"  title="Probar">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M6 4l10 6-10 6V4z"/></svg>
+        </button>
+        <button class="editBtn icon-btn icon-amber"  title="Editar">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-9 9L4 16l.586-3.414 9-9z"/></svg>
+        </button>
+        <button class="cloneBtn icon-btn icon-cyan"   title="Duplicar">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 00-2 2v12h2V3h12V1zm4 4H8a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2zm0 16H8V7h12v14z"/></svg>
+        </button>
+        <button class="deleteBtn icon-btn icon-rose" title="Eliminar">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v10h-2V9zm4 0h2v10h-2V9z"/></svg>
+        </button>
+      </div>
+    </td>
+
+    <!-- Regalo -->
+    <td class="py-2 pr-3 align-top">
+      <span class="giftLabel block"></span>
+    </td>
+
+    <!-- Chips resumen de acciones -->
+    <td class="py-2 pr-3 align-top">
+      <div class="flex flex-wrap gap-1.5 actionChips"></div>
+
+      <!-- Campos ocultos (siguen editables por modal/inline si quieres conservarlos) -->
+      <span class="hidden cell-editable" contenteditable="true" data-field="webhook"></span>
+      <span class="hidden cell-editable" contenteditable="true" data-field="key"></span>
+      <span class="hidden cell-editable" contenteditable="true" data-field="mcCommand"></span>
+      <span class="hidden cell-editable" contenteditable="true" data-field="soundUrl"></span>
+      <span class="hidden" data-field="soundVolumeLabel">100%</span>
+      <span class="hidden cell-editable" contenteditable="true" data-field="videoUrl"></span>
+      <span class="hidden" data-field="videoVolumeLabel">100%</span>
+      <input class="hidden" type="checkbox" data-field="videoLoopChk">
+    </td>
+
+    <!-- Rep. -->
+    <td class="py-2 pr-3 align-top">
+      <span class="cell-editable block text-center" contenteditable="true" data-field="repeat">1</span>
+    </td>
+  </tr>
+</template>
+
+
+
+
+  <script>
+  // =========================
+  //   Gate de Licencias (servidor)
+  // =========================
+  const licenseGate = document.getElementById('licenseGate');
+  const licenseInput = document.getElementById('licenseInput');
+  const licenseBtn = document.getElementById('licenseBtn');
+  const licenseMsg = document.getElementById('licenseMsg');
+  const appRoot = document.getElementById('appRoot');
+
+  function showGate() { licenseGate.style.display = 'flex'; appRoot.style.opacity = '0.25'; appRoot.style.pointerEvents = 'none'; }
+  function hideGate() { licenseGate.style.display = 'none'; appRoot.style.opacity = '1'; appRoot.style.pointerEvents = 'auto'; }
+
+  async function validateLicenseKey(key) {
+    try {
+      licenseMsg.textContent = 'Validando licencia...';
+      const r = await fetch('/license/validate', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ key, deviceId: window.deviceInfo?.deviceId || '' })
+      });
+      return await r.json(); // { ok, status?, reason? }
+    } catch {
+      return { ok:false, reason:'Error de red' };
+    }
+  }
+
+  async function claimLicenseKey(key) {
+    try {
+      const r = await fetch('/license/claim', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ key, deviceId: window.deviceInfo?.deviceId || '' })
+      });
+      return await r.json(); // { ok, reason? }
+    } catch {
+      return { ok:false, reason:'Error de red' };
+    }
+  }
+
+  async function attemptAutoLogin() {
+    const saved = localStorage.getItem('licenseKey') || '';
+    if (!saved) { showGate(); return; }
+    const res = await validateLicenseKey(saved);
+    if (res.ok && (res.status === 'MATCH' || res.status === 'UNCLAIMED')) {
+      // Si estuviera UNCLAIMED (caso raro con saved), reclamamos ahora:
+      if (res.status === 'UNCLAIMED') {
+        const cl = await claimLicenseKey(saved);
+        if (!cl.ok) { localStorage.removeItem('licenseKey'); showGate(); licenseMsg.textContent = '❌ ' + (cl.reason||'No se pudo reclamar'); return; }
+      }
+      hideGate();
+    } else {
+      localStorage.removeItem('licenseKey'); showGate();
+      if (res.reason) licenseMsg.textContent = '❌ ' + res.reason;
+    }
+  }
+
+  licenseBtn.addEventListener('click', async () => {
+    const key = (licenseInput.value || '').trim();
+    if (!key) { licenseMsg.textContent = 'Ingresa una licencia.'; return; }
+
+    licenseBtn.disabled = true;
+    const res = await validateLicenseKey(key);
+    licenseBtn.disabled = false;
+
+    if (!res.ok) {
+      licenseMsg.textContent = '❌ ' + (res.reason || 'Licencia inválida.');
+      return;
+    }
+
+    if (res.status === 'MATCH') {
+      localStorage.setItem('licenseKey', key);
+      licenseMsg.textContent = 'Licencia válida. ¡Bienvenido!';
+      hideGate();
+    } else if (res.status === 'UNCLAIMED') {
+      const cl = await claimLicenseKey(key);
+      if (cl.ok) {
+        localStorage.setItem('licenseKey', key);
+        licenseMsg.textContent = 'Licencia reclamada. ¡Bienvenido!';
+        hideGate();
+      } else {
+        licenseMsg.textContent = '❌ ' + (cl.reason || 'No se pudo reclamar.');
+      }
+    } else {
+      licenseMsg.textContent = '❌ ' + (res.reason || 'Licencia inválida.');
+    }
+  });
+
+  attemptAutoLogin();
+</script>
+
+
+  <script>
+    // =========================
+    //   Router por hash
+    // =========================
+    const pages = Array.from(document.querySelectorAll('[data-page]'));
+    const links = Array.from(document.querySelectorAll('.navlink'));
+    function showPage(name){
+      pages.forEach(sec => sec.classList.toggle('hidden', sec.dataset.page !== name));
+      links.forEach(a => a.classList.toggle('bg-zinc-800', a.getAttribute('href') === '#' + name));
+      document.getElementById('pageTitle').textContent = name.charAt(0).toUpperCase() + name.slice(1);
+    }
+    window.addEventListener('hashchange', () => showPage(location.hash.replace('#','') || 'inicio'));
+    showPage(location.hash.replace('#','') || 'inicio');
+  </script>
+
+  <script>
+    // =========================
+    //   App + Minecraft + UI
+    // =========================
+    const socket = io();
+    const $ = (s, r=document) => r.querySelector(s);
+    const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+    // elementos reutilizados
+    const webhookBody = $('#webhookBody');
+    const rowTpl = $('#rowTemplate');
+    const eventModal = $('#eventModal');
+    // --- MODO EDICIÓN ---
+    let editingRow = null; // referencia a la <tr> que se está editando (o null si es "agregar")
+
+
+    // Modal elements
+    const giftPickerBtn = $('#giftPickerBtn');
+    const giftPickerMenu = $('#giftPickerMenu');
+    const giftPickerSearch = $('#giftPickerSearch');
+    const giftPickerList = $('#giftPickerList');
+    const giftPickerLabel = $('#giftPickerLabel');
+    const giftPickerThumb = $('#giftPickerThumb');
+    const selectedGiftId = $('#selectedGiftId');
+
+    // checkboxes + inputs modal
+    const chkWebhook = $('#chkWebhook');
+    const chkKey = $('#chkKey');
+    const chkMC = $('#chkMC');
+    const wrapWebhook = $('#wrapWebhook');
+    const wrapKey = $('#wrapKey');
+    const wrapMC = $('#wrapMC');
+    const inpWebhook = $('#modalWebhook');
+    const inpKey = $('#modalKey');
+    const inpMC = $('#modalMC');
+
+    // Video (modal)
+    const chkVideo = $('#chkVideo');
+    const wrapVideo = $('#wrapVideo');
+    const inpVideoUrl = $('#modalVideoUrl');
+    const inpVideoFile = $('#modalVideoFile');
+    const btnVideoUpload = $('#modalVideoUpload');
+    const inpVideoVol = $('#modalVideoVol');
+    const lblVideoVol = $('#modalVideoVolLbl');
+    const chkVideoLoop = $('#modalVideoLoop');
+
+    // metas
+    const likesBar = $('#likesBar'); const likesLabel = $('#likesLabel');
+    const likesTarget = $('#likesTarget'); const likesSet = $('#likesSet'); const likesReset = $('#likesReset');
+    const followsBar = $('#followsBar'); const followsLabel = $('#followsLabel');
+    const followsTarget = $('#followsTarget'); const followsSet = $('#followsSet'); const followsReset = $('#followsReset');
+
+    // TTS prefs
+    const ttsEnabled = $('#ttsEnabled'); const ttsVoice = $('#ttsVoice');
+
+    let giftCatalog = {}; // id -> {name, image, diamondCount}
+    let goals = { likes:{target:0,current:0}, followers:{target:0,current:0} };
+
+    // Debounce
+    let debounceTimer = null;
+    const debounce = (fn, ms=500) => (...a) => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => fn(...a), ms); };
+
+    // ---------- UI helpers ----------
+    function setStatus(connected){
+      $('#connectBtn').disabled = connected;
+      $('#disconnectBtn').disabled = !connected;
+      $('#statusLed').className = 'inline-block size-2 rounded-full ' + (connected ? 'bg-emerald-500' : 'bg-zinc-400');
+      $('#statusText').textContent = connected ? 'Conectado' : 'Desconectado';
+    }
+
+    // Ordena entries del catálogo por precio (asc), luego nombre
+function sortedEntriesByPrice(obj){
+  return Object.entries(obj || {}).sort(([, a], [, b]) => {
+    const da = a?.diamondCount ?? 0, db = b?.diamondCount ?? 0;
+    if (da !== db) return da - db;
+    const na = (a?.name || '').toLowerCase(), nb = (b?.name || '').toLowerCase();
+    if (na !== nb) return na < nb ? -1 : 1;
+    return 0;
+  });
+}
+
+
+    function appendLog(msg){
+      if ($('#pauseLogChk')?.checked) return;
+      const log = $('#log');
+      const el = document.createElement('div');
+      el.textContent = msg;
+      log.appendChild(el);
+      const MAX = 500;
+      while(log.childNodes.length > MAX){ log.removeChild(log.firstChild); }
+      if($('#autoScrollChk').checked) log.scrollTop = log.scrollHeight;
+    }
+
+    function formatGiftLabel(id){
+      if (id === 'FOLLOW') return 'Seguidores (cada nuevo seguidor)';
+      if (id && id.startsWith('LIKES:')) {
+        const step = parseInt(id.split(':')[1], 10) || 1;
+        return `Likes (cada ${step} likes)`;
+      }
+      const g = giftCatalog[id];
+      if (g) return `${g.name} (ID ${id} • ${g.diamondCount||0}💎)`;
+      return `ID ${id}`;
+    }
+
+    function percent(cur, tar){ return Math.max(0, Math.min(100, tar ? (cur*100/tar) : 0)); }
+    function renderGoals(){
+      likesLabel.textContent = `${goals.likes.current} / ${goals.likes.target}`;
+      likesBar.style.width = percent(goals.likes.current, goals.likes.target) + '%';
+      followsLabel.textContent = `${goals.followers.current} / ${goals.followers.target}`;
+      followsBar.style.width = percent(goals.followers.current, goals.followers.target) + '%';
+    }
+
+    function renderGiftCatalog(){
+  const cont = $('#giftCatalog');
+  cont.innerHTML = '';
+  for (const [id, g] of sortedEntriesByPrice(giftCatalog)) {
+    const card = document.createElement('div');
+    card.className = 'rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 flex items-center gap-3';
+    const img = document.createElement('img');
+    img.src = g.image || '';
+    img.alt = g.name || 'Gift';
+    img.className = 'size-10 rounded-lg object-cover bg-zinc-200 dark:bg-zinc-800 ' + (g.image ? '' : 'hidden');
+    const name = document.createElement('div');
+    name.innerHTML = `<p class="text-sm font-medium">${g.name || 'Regalo'}</p><p class="text-xs text-zinc-500">ID ${id} • ${g.diamondCount||0}💎</p>`;
+    card.append(img, name);
+    cont.append(card);
+  }
+}
+
+
+    // Renderiza la celda "Regalo" con imagen + nombre + meta
+function renderGiftCell(el, giftId){
+  // Casos especiales:
+  if (giftId === 'FOLLOW'){
+    el.innerHTML = `<div class="flex items-center gap-2">
+      <span class="inline-flex items-center justify-center size-8 rounded-lg bg-emerald-600/15 text-emerald-600">+</span>
+      <div>
+        <div class="text-sm font-medium">Seguidores</div>
+        <div class="text-[11px] text-zinc-500">Cada nuevo seguidor</div>
+      </div>
+    </div>`;
+    return;
+  }
+  if (giftId && giftId.startsWith('LIKES:')){
+    const step = parseInt(giftId.split(':')[1],10) || 1;
+    el.innerHTML = `<div class="flex items-center gap-2">
+      <span class="inline-flex items-center justify-center size-8 rounded-lg bg-purple-600/15 text-purple-600">♥</span>
+      <div>
+        <div class="text-sm font-medium">Likes</div>
+        <div class="text-[11px] text-zinc-500">Cada ${step} likes</div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Regalo normal desde catálogo
+  const g = giftCatalog[giftId];
+  if (g){
+    const img = g.image ? `<img src="${g.image}" class="size-8 rounded-lg object-cover bg-zinc-200 dark:bg-zinc-800">` : `<div class="size-8 rounded-lg bg-zinc-200 dark:bg-zinc-800"></div>`;
+    el.innerHTML = `<div class="flex items-center gap-2">
+      ${img}
+      <div>
+        <div class="text-sm font-medium">${g.name || 'Regalo'}</div>
+        <div class="text-[11px] text-zinc-500">ID ${giftId} • ${(g.diamondCount||0)}💎</div>
+      </div>
+    </div>`;
+  } else {
+    // Fallback si no está en catálogo
+    el.textContent = formatGiftLabel(giftId);
+  }
+}
+
+
+function makeChip(kind, text, title=''){
+  const span = document.createElement('span');
+  span.className = `chip chip-${kind}`;
+  span.title = title || text;
+  span.innerHTML = ({
+    web: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4h14v12H3z"/></svg>${text}`,
+    key: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 10a5 5 0 119.9 1H20v2h-3v3h-2v-3h-2.1A5 5 0 013 10z"/></svg>${text}`,
+    mc:  `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 4h12v12H4z"/></svg>${text}`,
+    snd: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M11 5v10l-4-3H4V8h3l4-3zM15 8a3 3 0 010 6"/></svg>${text}`,
+    vid: `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4h10v12H3zM14 7l4-2v10l-4-2z"/></svg>${text}`
+  })[kind] || text;
+  return span;
+}
+
+function renderActionChips(tr){
+  const box = tr.querySelector('.actionChips');
+  if (!box) return;
+  box.innerHTML = '';
+
+  const get = sel => (tr.querySelector(sel)?.textContent || '').trim();
+
+  const webhook = get('[data-field="webhook"]');
+  const key     = get('[data-field="key"]');
+  const mc      = get('[data-field="mcCommand"]');
+  const snd     = get('[data-field="soundUrl"]');
+  const sndVol  = tr.querySelector('[data-field="soundVolumeLabel"]')?.textContent || '100%';
+  const vid     = get('[data-field="videoUrl"]');
+  const vidVol  = tr.querySelector('[data-field="videoVolumeLabel"]')?.textContent || '100%';
+  const vLoop   = tr.querySelector('[data-field="videoLoopChk"]')?.checked;
+
+  if (webhook) box.appendChild(makeChip('web', 'Webhook', webhook));
+  if (key)     box.appendChild(makeChip('key',  `Tecla: ${key}`));
+  if (mc)      box.appendChild(makeChip('mc',   'MC', mc));
+  if (snd)     box.appendChild(makeChip('snd',  `Sonido ${sndVol}`, snd));
+  if (vid)     box.appendChild(makeChip('vid',  `Video ${vidVol}${vLoop?' • loop':''}`, vid));
+
+  if (!box.childNodes.length){
+    const none = document.createElement('span');
+    none.className = 'text-[11px] text-zinc-500';
+    none.textContent = 'Sin acciones';
+    box.appendChild(none);
+  }
+}
+
+
+function addRow({giftId='', webhook='', key='', mcCommand='', repeat=1,
+                 soundUrl='', soundVolume=1,
+                 ttsText='',
+                 videoUrl='', videoVolume=1, videoLoop=false } = {}) {
+  const tr = rowTpl.content.firstElementChild.cloneNode(true);
+  tr.dataset.giftId = giftId;
+
+  renderGiftCell(tr.querySelector('.giftLabel'), giftId);
+
+  // Campos existentes
+  tr.querySelector('[data-field="webhook"]').textContent   = webhook   || '';
+  tr.querySelector('[data-field="key"]').textContent       = key       || '';
+  tr.querySelector('[data-field="mcCommand"]').textContent = mcCommand || '';
+  tr.querySelector('[data-field="repeat"]').textContent    = String(Math.max(1, parseInt(repeat, 10) || 1));
+  tr.querySelector('[data-field="soundUrl"]').textContent  = soundUrl  || '';
+  const soundVolPct = Math.round(Math.max(0, Math.min(1, parseFloat(soundVolume ?? 1))) * 100);
+  const soundVolLbl = tr.querySelector('[data-field="soundVolumeLabel"]');
+  if (soundVolLbl) soundVolLbl.textContent = `${soundVolPct}%`;
+  const ttsCell = tr.querySelector('[data-field="ttsText"]');
+  if (ttsCell) ttsCell.textContent = ttsText || '';
+
+  // 🎬 Video
+  const videoCell = tr.querySelector('[data-field="videoUrl"]');
+  if (videoCell) videoCell.textContent = videoUrl || '';
+  const videoVolLbl = tr.querySelector('[data-field="videoVolumeLabel"]');
+  if (videoVolLbl) videoVolLbl.textContent = `${Math.round((videoVolume ?? 1) * 100)}%`;
+  const loopChk = tr.querySelector('[data-field="videoLoopChk"]');
+  if (loopChk) loopChk.checked = !!videoLoop;
+
+  // ✅ Chips/insignias de acciones: justo DESPUÉS de rellenar los campos
+  if (typeof renderActionChips === 'function') renderActionChips(tr);
+
+  // Listeners generales
+  tr.querySelectorAll('.cell-editable').forEach(el => {
+    el.addEventListener('blur', ()=>{
+      if (typeof renderActionChips === 'function') renderActionChips(tr);
+      debounce(saveWebhooks, 400)();
+    });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); }});
+  });
+
+  // Subir video en fila
+  tr.querySelector('.uploadVideoBtn')?.addEventListener('click', () => {
+    const picker = document.createElement('input');
+    picker.type = 'file'; picker.accept = 'video/*';
+    picker.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const fd = new FormData();
+        fd.append('video', file);
+        const r = await fetch('/uploadVideo', { method:'POST', body: fd });
+        const j = await r.json();
+        if (j.ok && j.url) {
+          if (videoCell) videoCell.textContent = j.url;
+          toast('🎬 Video subido');
+          if (typeof renderActionChips === 'function') renderActionChips(tr);
+          saveWebhooks();
+        } else {
+          toast('❌ No se pudo subir el video');
+        }
+      } catch {
+        toast('❌ Error de red al subir video');
+      }
+    });
+    picker.click();
+  });
+
+  loopChk?.addEventListener('change', ()=>{
+    if (typeof renderActionChips === 'function') renderActionChips(tr);
+    debounce(saveWebhooks, 200)();
+  });
+
+  tr.querySelector('.deleteBtn')?.addEventListener('click', () => { tr.remove(); saveWebhooks(); });
+  tr.querySelector('.testBtn')?.addEventListener('click', async () => {
+    const id = tr.dataset.giftId;
+    if (!id) return toast('Falta el ID del regalo.');
+    try {
+      await fetch('/testGift', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ giftId: id, username: 'tester', quantity: 1 })
+      });
+      appendLog(`▶️ Test ejecutado para ID ${id}`);
+    } catch (e) {
+      appendLog('⚠️ Error en test: ' + e);
+    }
+  });
+ tr.querySelector('.editBtn')?.addEventListener('click', () => {
+  openEditForRow(tr);
+});
+
+  tr.querySelector('.cloneBtn')?.addEventListener('click', () => {
+    const clone = tr.cloneNode(true);
+    addRowListeners(clone);
+    // 🔁 volver a renderizar chips en el clon
+    if (typeof renderActionChips === 'function') renderActionChips(clone);
+    tr.parentElement.insertBefore(clone, tr.nextSibling);
+    saveWebhooks();
+  });
+
+  $('#webhookBody').appendChild(tr);
+
+  function addRowListeners(row) {
+    row.querySelector('.deleteBtn')?.addEventListener('click', () => { row.remove(); saveWebhooks(); });
+    row.querySelector('.testBtn')?.addEventListener('click', async () => {
+      const id = row.dataset.giftId;
+      if (!id) return;
+      try {
+        await fetch('/testGift', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ giftId: id, username: 'tester', quantity: 1 })
+        });
+      } catch {}
+    });
+    row.querySelector('.editBtn')?.addEventListener('click', () => {
+  openEditForRow(row);
+});
+
+    row.querySelector('.cloneBtn')?.addEventListener('click', () => {
+      const again = row.cloneNode(true);
+      addRowListeners(again);
+      if (typeof renderActionChips === 'function') renderActionChips(again);
+      row.parentElement.insertBefore(again, row.nextSibling);
+      saveWebhooks();
+    });
+
+    // 🔁 listeners también para los editables del clon
+    row.querySelectorAll('.cell-editable').forEach(el => {
+      el.addEventListener('blur', ()=>{
+        if (typeof renderActionChips === 'function') renderActionChips(row);
+        debounce(saveWebhooks, 400)();
+      });
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); }});
+    });
+
+    // 🔁 loop del clon
+    const rowLoop = row.querySelector('[data-field="videoLoopChk"]');
+    rowLoop?.addEventListener('change', ()=>{
+      if (typeof renderActionChips === 'function') renderActionChips(row);
+      debounce(saveWebhooks, 200)();
+    });
+
+    // 🔁 subir video del clon
+    row.querySelector('.uploadVideoBtn')?.addEventListener('click', () => {
+      const picker = document.createElement('input');
+      picker.type = 'file'; picker.accept = 'video/*';
+      picker.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+          const fd = new FormData();
+          fd.append('video', file);
+          const r = await fetch('/uploadVideo', { method:'POST', body: fd });
+          const j = await r.json();
+          if (j.ok && j.url) {
+            const cell = row.querySelector('[data-field="videoUrl"]');
+            if (cell) cell.textContent = j.url;
+            toast('🎬 Video subido');
+            if (typeof renderActionChips === 'function') renderActionChips(row);
+            saveWebhooks();
+          } else {
+            toast('❌ No se pudo subir el video');
+          }
+        } catch {
+          toast('❌ Error de red al subir video');
+        }
+      });
+      picker.click();
+    });
+  }
+}
+
+
+
+
+
+
+ function getRowsData(){
+  const clean = (el)=> (el?.textContent || '').replace(/\s+/g,' ').trim();
+  return $$('#webhookBody tr').map(tr => {
+    const giftId = tr.dataset.giftId;
+    const webhook   = clean(tr.querySelector('[data-field="webhook"]'));
+    const key       = clean(tr.querySelector('[data-field="key"]')).toLowerCase();
+    const mcCommand = clean(tr.querySelector('[data-field="mcCommand"]'));
+    const repeat    = Math.max(1, parseInt(clean(tr.querySelector('[data-field="repeat"]')), 10) || 1);
+    const soundUrl  = clean(tr.querySelector('[data-field="soundUrl"]')) || '';
+    const soundVolumeText = tr.querySelector('[data-field="soundVolumeLabel"]')?.textContent || '100%';
+    const soundVolume = Math.max(0, Math.min(1, (parseInt(soundVolumeText,10) || 100)/100));
+    const ttsText   = clean(tr.querySelector('[data-field="ttsText"]'));
+
+    const videoUrl  = clean(tr.querySelector('[data-field="videoUrl"]'));
+    const videoVolumeText = tr.querySelector('[data-field="videoVolumeLabel"]')?.textContent || '100%';
+    const videoVolume = Math.max(0, Math.min(1, (parseInt(videoVolumeText,10) || 100)/100));
+    const videoLoop = !!tr.querySelector('[data-field="videoLoopChk"]')?.checked;
+
+    return { giftId, webhook, key, mcCommand, repeat, soundUrl, soundVolume, ttsText, videoUrl, videoVolume, videoLoop };
+  })
+  .filter(r => r.giftId && (r.webhook || r.key || r.mcCommand || r.soundUrl || r.ttsText || r.videoUrl));
+}
+
+async function saveWebhooks(){
+  const data = {};
+  for(const row of getRowsData()){
+    data[row.giftId] = {};
+    if(row.webhook)       data[row.giftId].webhook       = row.webhook;
+    if(row.key)           data[row.giftId].key           = row.key;
+    if(row.mcCommand)     data[row.giftId].mcCommand     = row.mcCommand;
+    if(row.repeat)        data[row.giftId].repeat        = row.repeat;
+    if(row.soundUrl)      data[row.giftId].soundUrl      = row.soundUrl;
+    if(row.soundVolume!=null) data[row.giftId].soundVolume = row.soundVolume;
+    if(row.ttsText)       data[row.giftId].ttsText       = row.ttsText;
+
+    // 🎬 Video
+    if(row.videoUrl)      data[row.giftId].videoUrl      = row.videoUrl;
+    if(row.videoVolume!=null) data[row.giftId].videoVolume = row.videoVolume;
+    if(row.videoLoop!=null)   data[row.giftId].videoLoop   = !!row.videoLoop;
+
+    if (!Object.keys(data[row.giftId]).length) delete data[row.giftId];
+  }
+  try{
+    await fetch('/setWebhooks', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(data)
+    });
+    appendLog('💾 Eventos guardados');
+  }catch(e){ appendLog('⚠️ Error guardando eventos: '+e); }
+}
+
+
+
+    function loadWebhooks(data){
+  $('#webhookBody').innerHTML='';
+  for(const [giftId, value] of Object.entries(data)){
+    if (typeof value === 'string') {
+      addRow({giftId, webhook: value, key:'', mcCommand:'', repeat:1});
+    } else {
+      addRow({
+        giftId,
+        webhook: value.webhook||'',
+        key: value.key||'',
+        mcCommand: value.mcCommand||'',
+        repeat: value.repeat||1,
+        soundUrl: value.soundUrl || '',
+        soundVolume: (value.soundVolume!=null ? value.soundVolume : 1),
+        ttsText: value.ttsText || '',
+        videoUrl: value.videoUrl || '',
+        videoVolume: (value.videoVolume!=null ? value.videoVolume : 1),
+        videoLoop: !!value.videoLoop
+      });
+    }
+  }
+}
+
+
+
+    // ---------- Gift picker (modal) ----------
+    function openGiftMenu(){
+      giftPickerMenu.classList.remove('hidden');
+      giftPickerSearch.value = '';
+      renderGiftPickerList('');
+    }
+    function closeGiftMenu(){ giftPickerMenu.classList.add('hidden'); }
+
+    function renderGiftPickerList(query){
+  const q = (query||'').toLowerCase();
+  giftPickerList.innerHTML = '';
+
+  // 👉 Ordenamos primero
+  const sorted = Object.entries(giftCatalog).sort(([,a],[,b])=>{
+    const da = a?.diamondCount ?? 0, db = b?.diamondCount ?? 0;
+    if(da !== db) return da - db;
+    const na = (a?.name||'').toLowerCase(), nb = (b?.name||'').toLowerCase();
+    return na.localeCompare(nb);
+  });
+
+  // 👉 Render en orden
+  for (const [id,g] of sorted){
+    const txt = `${g.name} ${id} ${g.diamondCount||0}`.toLowerCase();
+    if(q && !txt.includes(q)) continue;
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'w-full px-2 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 text-left';
+    row.innerHTML = `
+      <img src="${g.image||''}" class="w-6 h-6 rounded bg-zinc-200 dark:bg-zinc-700 ${g.image?'':'hidden'}" alt="">
+      <span class="flex-1 truncate">${g.name}</span>
+      <span class="text-xs text-zinc-500">${g.diamondCount||0}💎 • ID ${id}</span>
+    `;
+
+    row.addEventListener('click', ()=>{
+      selectedGiftId.value = id;
+      giftPickerLabel.textContent = `${g.name} — ${g.diamondCount||0}💎 (ID ${id})`;
+      if (g.image) { 
+        giftPickerThumb.src = g.image; 
+        giftPickerThumb.classList.remove('hidden'); 
+      } else {
+        giftPickerThumb.classList.add('hidden');
+      }
+      closeGiftMenu();
+    });
+
+    giftPickerList.appendChild(row);
+  }
+}
+
+
+    giftPickerBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openGiftMenu(); });
+    document.addEventListener('click', (e)=>{ if(!giftPickerMenu.contains(e.target) && e.target!==giftPickerBtn){ closeGiftMenu(); }});
+    giftPickerSearch.addEventListener('input', e=> renderGiftPickerList(e.target.value));
+    btnVideoUpload?.addEventListener('click', () => inpVideoFile?.click());
+inpVideoFile?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const fd = new FormData();
+    fd.append('video', file);
+    const r = await fetch('/uploadVideo', { method:'POST', body: fd });
+    const j = await r.json();
+    if (j.ok && j.url) {
+      inpVideoUrl.value = j.url;
+      toast('🎬 Video subido');
+    } else {
+      toast('❌ No se pudo subir el video');
+    }
+  } catch {
+    toast('❌ Error de red al subir video');
+  } finally {
+    e.target.value = '';
+  }
+});
+
+    // --- NUEVO: Sonido ---
+    const chkSound = $('#chkSound');
+    const wrapSound = $('#wrapSound');
+    const inpSound  = $('#modalSound');
+    const inpSoundVol = $('#modalSoundVol');
+    const lblSoundVol = $('#modalSoundVolLbl');
+    const openSoundLibBtn = $('#openSoundLib');
+
+    function syncActionFields() {
+      wrapWebhook.classList.toggle('hidden', !chkWebhook.checked);
+      wrapKey.classList.toggle('hidden', !chkKey.checked);
+      wrapMC.classList.toggle('hidden', !chkMC.checked);
+      wrapSound.classList.toggle('hidden', !chkSound.checked); // <== añade esto
+      wrapVideo.classList.toggle('hidden', !chkVideo.checked);
+      
+    }
+    chkSound.addEventListener('change', syncActionFields);
+    chkVideo.addEventListener('change', syncActionFields);
+
+    inpVideoVol?.addEventListener('input', () => {
+  const pct = Math.round((parseFloat(inpVideoVol.value || '1') || 1) * 100);
+  lblVideoVol.textContent = pct + '%';
+});
+inpSoundVol?.addEventListener('input', () => {
+  const pct = Math.round((parseFloat(inpSoundVol.value || '1') || 1) * 100);
+  lblSoundVol.textContent = pct + '%';
+});
+    chkWebhook.addEventListener('change', syncActionFields);
+    chkKey.addEventListener('change', syncActionFields);
+    chkMC.addEventListener('change', syncActionFields);
+
+    // Modal actions
+    $('#addRowBtn').addEventListener('click', async () => {
+      if (!Object.keys(giftCatalog).length) {
+        try { const res = await fetch('/getGiftCatalog'); giftCatalog = await res.json(); } catch {}
+      }
+      if (!Object.keys(giftCatalog).length) {
+        toast('No hay catálogo cargado aún. Conéctate a un live al menos una vez para generarlo.');
+        return;
+      }
+      chkSound.checked = false;
+      inpSound.value = '';
+      inpSoundVol.value = 1;
+      lblSoundVol.textContent = '100%';
+      chkVideo.checked = false;
+      inpVideoUrl.value = '';
+      inpVideoVol.value = 1;
+      lblVideoVol.textContent = '100%';
+      chkVideoLoop.checked = false;
+
+
+      selectedGiftId.value = '';
+      giftPickerThumb.classList.add('hidden');
+      giftPickerLabel.textContent = '— Selecciona un regalo —';
+      chkWebhook.checked = false; chkKey.checked = false; chkMC.checked = false;
+      inpWebhook.value = ''; $('#modalKey').value = ''; $('#modalMC').value = '';
+      $('#modalRepeat').value = '1';
+      syncActionFields();
+      eventModal.showModal();
+    });
+
+    function openEditForRow(tr){
+  editingRow = tr;
+  eventModal.dataset.mode = 'edit';
+  $('#modalAdd').textContent = 'Guardar cambios';
+
+  // 1) Gift
+  const gid = tr.dataset.giftId || '';
+  selectedGiftId.value = gid;
+
+  // Rellena el “picker” visual del gift
+  if (gid === 'FOLLOW') {
+    giftPickerThumb.classList.add('hidden');
+    giftPickerLabel.textContent = 'Seguidores (cada nuevo seguidor)';
+  } else if (gid.startsWith('LIKES:')) {
+    const step = parseInt(gid.split(':')[1],10) || 1;
+    giftPickerThumb.classList.add('hidden');
+    giftPickerLabel.textContent = `Likes (cada ${step} likes)`;
+  } else {
+    const g = giftCatalog[gid];
+    if (g) {
+      giftPickerLabel.textContent = `${g.name} — ${g.diamondCount||0}💎 (ID ${gid})`;
+      if (g.image) { giftPickerThumb.src = g.image; giftPickerThumb.classList.remove('hidden'); }
+      else giftPickerThumb.classList.add('hidden');
+    } else {
+      giftPickerThumb.classList.add('hidden');
+      giftPickerLabel.textContent = `ID ${gid}`;
+    }
+  }
+
+  // 2) Valores actuales de la fila
+  const clean = (sel)=> (tr.querySelector(sel)?.textContent || '').trim();
+  const webhook   = clean('[data-field="webhook"]');
+  const key       = clean('[data-field="key"]');
+  const mcCommand = clean('[data-field="mcCommand"]');
+  const repeat    = clean('[data-field="repeat"]') || '1';
+  const soundUrl  = clean('[data-field="soundUrl"]');
+  const soundVolLabel = tr.querySelector('[data-field="soundVolumeLabel"]')?.textContent || '100%';
+  const soundVol  = Math.max(0, Math.min(1, (parseInt(soundVolLabel,10) || 100)/100));
+
+  const videoUrl  = clean('[data-field="videoUrl"]');
+  const videoVolLabel = tr.querySelector('[data-field="videoVolumeLabel"]')?.textContent || '100%';
+  const videoVol  = Math.max(0, Math.min(1, (parseInt(videoVolLabel,10) || 100)/100));
+  const videoLoop = !!tr.querySelector('[data-field="videoLoopChk"]')?.checked;
+
+  // 3) Marcar checkboxes según haya valor
+  chkWebhook.checked = !!webhook;
+  chkKey.checked     = !!key;
+  chkMC.checked      = !!mcCommand;
+  chkSound.checked   = !!soundUrl;
+  chkVideo.checked   = !!videoUrl;
+
+  // 4) Poner valores en los inputs del modal
+  inpWebhook.value     = webhook || '';
+  $('#modalKey').value = key || '';
+  $('#modalMC').value  = mcCommand || '';
+  $('#modalRepeat').value = repeat || '1';
+
+  inpSound.value = soundUrl || '';
+  inpSoundVol.value = String(soundVol);
+  $('#modalSoundVolLbl').textContent = `${Math.round(soundVol*100)}%`;
+
+  inpVideoUrl.value = videoUrl || '';
+  inpVideoVol.value = String(videoVol);
+  $('#modalVideoVolLbl').textContent = `${Math.round(videoVol*100)}%`;
+  chkVideoLoop.checked = !!videoLoop;
+
+  // 5) Mostrar/ocultar wrappers
+  syncActionFields();
+
+  // 6) Abrir
+  eventModal.showModal();
+}
+
+
+// ---- Reglas especiales: FOLLOW y LIKES:step ----
+document.getElementById('addFollowRuleBtn')?.addEventListener('click', () => {
+  selectedGiftId.value = 'FOLLOW';
+  giftPickerThumb.classList.add('hidden');
+  giftPickerLabel.textContent = 'Seguidores (cada nuevo seguidor)';
+  chkWebhook.checked = false; chkKey.checked = false; chkMC.checked = false;
+  inpWebhook.value = ''; $('#modalKey').value = ''; $('#modalMC').value = '';
+  $('#modalRepeat').value = '1';
+  syncActionFields();
+  eventModal.showModal();
+});
+
+// split button
+document.getElementById('addMenuBtn')?.addEventListener('click', (e)=>{
+  e.stopPropagation();
+  document.getElementById('addMenu')?.classList.toggle('hidden');
+});
+document.addEventListener('click', ()=> document.getElementById('addMenu')?.classList.add('hidden'));
+
+// modo denso
+document.getElementById('denseToggle')?.addEventListener('change', (e)=>{
+  const table = document.getElementById('eventsTable');
+  if (!table) return;
+  table.classList.toggle('dense', e.target.checked);
+});
+
+
+const likesStepDialog = document.getElementById('likesStepDialog');
+const likesStepInput  = document.getElementById('likesStepInput');
+const likesStepOk     = document.getElementById('likesStepOk');
+const likesStepCancel = document.getElementById('likesStepCancel');
+
+document.getElementById('addLikesRuleBtn')?.addEventListener('click', () => {
+  // Abrimos nuestro mini modal en lugar de prompt()
+  likesStepInput.value = likesStepInput.value || '50';
+  likesStepDialog.showModal();
+});
+
+likesStepCancel?.addEventListener('click', (e) => {
+  e.preventDefault();
+  likesStepDialog.close();
+});
+
+likesStepOk?.addEventListener('click', (e) => {
+  e.preventDefault();
+  const step = Math.max(1, parseInt(likesStepInput.value, 10) || 0);
+  if (!step) return;
+
+  // Prepara el modal principal con la regla LIKES:<step>
+  selectedGiftId.value = `LIKES:${step}`;
+  giftPickerThumb.classList.add('hidden');
+  giftPickerLabel.textContent = `Likes (cada ${step} likes)`;
+  chkWebhook.checked = false; chkKey.checked = false; chkMC.checked = false;
+  inpWebhook.value = ''; $('#modalKey').value = ''; $('#modalMC').value = '';
+  $('#modalRepeat').value = '1';
+  syncActionFields();
+
+  likesStepDialog.close();
+  eventModal.showModal();
+});
+
+
+
+$('#modalCancel').addEventListener('click', (e) => {
+  e.preventDefault();
+  editingRow = null;
+  delete eventModal.dataset.mode;
+  $('#modalAdd').textContent = 'Agregar';
+  eventModal.close();
+});
+
+// (opcional) si cierras el diálogo por fuera (Esc)
+eventModal.addEventListener('close', () => {
+  editingRow = null;
+  delete eventModal.dataset.mode;
+  $('#modalAdd').textContent = 'Agregar';
+});
+
+
+document.getElementById('modalAdd').addEventListener('click', (e) => {
+  e.preventDefault();
+
+  const giftId = selectedGiftId.value;
+  if (!giftId) { toast('Selecciona un regalo.'); return; }
+
+  // ¿Qué acciones fueron marcadas?
+  const shouldWebhook = chkWebhook.checked;
+  const shouldKey     = chkKey.checked;
+  const shouldMC      = chkMC.checked;
+  const shouldSound   = chkSound.checked;
+  const shouldVideo   = chkVideo.checked;
+
+  // Recoger valores
+  const webhook   = shouldWebhook ? (inpWebhook.value.trim()) : '';
+  const key       = shouldKey     ? ($('#modalKey').value.trim()) : '';
+  const mcCommand = shouldMC      ? ($('#modalMC').value.trim())  : '';
+  const repeat    = Math.max(1, parseInt($('#modalRepeat').value, 10) || 1);
+
+  const soundUrl     = shouldSound ? (inpSound.value.trim()) : '';
+  const soundVolume  = shouldSound ? (parseFloat(inpSoundVol.value || '1') || 1) : null;
+
+  const videoUrl     = shouldVideo ? (inpVideoUrl.value.trim()) : '';
+  const videoVolume  = shouldVideo ? (parseFloat(inpVideoVol.value || '1') || 1) : null;
+  const videoLoop    = shouldVideo ? !!chkVideoLoop.checked : null;
+
+  // Validación mínima
+  if (!webhook && !key && !mcCommand && !soundUrl && !videoUrl) {
+    toast('Selecciona al menos una acción (Webhook, Tecla, Cmd MC, Sonido o Video).');
+    return;
+  }
+
+  // === MODO EDICIÓN ===
+  if (eventModal.dataset.mode === 'edit' && editingRow) {
+    const tr = editingRow;
+
+    // Actualiza el gift (permite cambiarlo)
+    tr.dataset.giftId = giftId;
+    renderGiftCell(tr.querySelector('.giftLabel'), giftId);
+
+    // Escribir los campos
+    const set = (sel, val) => { const el = tr.querySelector(sel); if (el) el.textContent = val || ''; };
+
+    set('[data-field="webhook"]',   webhook);
+    set('[data-field="key"]',       key.toLowerCase());
+    set('[data-field="mcCommand"]', mcCommand);
+    set('[data-field="repeat"]',    String(repeat));
+    set('[data-field="soundUrl"]',  soundUrl);
+    if (soundVolume != null) {
+      const lbl = tr.querySelector('[data-field="soundVolumeLabel"]');
+      if (lbl) lbl.textContent = `${Math.round(soundVolume*100)}%`;
+    }
+
+    set('[data-field="videoUrl"]', videoUrl);
+    if (videoVolume != null) {
+      const lbl = tr.querySelector('[data-field="videoVolumeLabel"]');
+      if (lbl) lbl.textContent = `${Math.round(videoVolume*100)}%`;
+    }
+    const loopChk = tr.querySelector('[data-field="videoLoopChk"]');
+    if (loopChk) loopChk.checked = !!videoLoop;
+
+    // Re-render chips y guardar
+    if (typeof renderActionChips === 'function') renderActionChips(tr);
+    saveWebhooks();
+
+    // Reset estado de edición y cerrar
+    editingRow = null;
+    delete eventModal.dataset.mode;
+    $('#modalAdd').textContent = 'Agregar';
+    eventModal.close();
+    return;
+  }
+
+  // === MODO AGREGAR ===
+  addRow({
+    giftId, webhook, key, mcCommand, repeat,
+    soundUrl, soundVolume,
+    videoUrl, videoVolume, videoLoop
+  });
+
+  saveWebhooks();
+  eventModal.close();
+});
+
+
+
+    // ---------- Eventos UI ----------
+    $('#saveAllBtn').addEventListener('click', saveWebhooks);
+
+    $('#exportBtn').addEventListener('click', async () => {
+      const res = await fetch('/getWebhooks');
+      const json = await res.json();
+      const blob = new Blob([JSON.stringify(json, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'webhooks.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    $('#importInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      const text = await file.text();
+      try{
+        const json = JSON.parse(text);
+        loadWebhooks(json);
+        await fetch('/setWebhooks', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(json)});
+        appendLog('⬆️ Importado y guardado');
+      }catch{ toast('JSON inválido'); }
+      e.target.value = '';
+    });
+
+    $('#connectBtn').addEventListener('click', async () => {
+      const username = $('#username').value.trim();
+      if(!username) return toast('Ingresa un usuario de TikTok');
+      try{
+        await fetch('/connect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username})});
+      }catch(e){ appendLog('❌ Error al conectar: '+e); }
+    });
+
+    $('#disconnectBtn').addEventListener('click', async () => {
+      try{ await fetch('/disconnect', {method:'POST'}); }catch(e){ appendLog('❌ Error al desconectar: '+e); }
+    });
+
+    $('#clearLogBtn').addEventListener('click', () => { $('#log').innerHTML=''; });
+
+    $('#searchInput')?.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      for(const tr of $$('#webhookBody tr')){
+        const text = tr.innerText.toLowerCase();
+        tr.style.display = text.includes(q) ? '' : 'none';
+      }
+    });
+
+    // ---------- Carga inicial ----------
+    (async function init(){
+      try{
+        const [webhooksRes, catalogRes, goalsRes, prefsRes] = await Promise.all([
+          fetch('/getWebhooks'),
+          fetch('/getGiftCatalog'),
+          fetch('/getGoals'),
+          fetch('/getPrefs')
+        ]);
+        const [webhooks, catalog, g, prefs] = await Promise.all([
+          webhooksRes.json(), catalogRes.json(), goalsRes.json(), prefsRes.ok ? prefsRes.json() : {}
+        ]);
+        giftCatalog = catalog || {};
+        renderGiftCatalog();
+        loadWebhooks(webhooks || {});
+        goals = g || goals;
+        renderGoals();
+        // prefs TTS
+        if (prefs && typeof prefs === 'object') {
+          if (prefs.ttsEnabled != null) ttsEnabled.checked = !!prefs.ttsEnabled;
+          if (prefs.ttsVoice) ttsVoice.value = prefs.ttsVoice;
+        }
+        // ---- Prefs de ServerTap -> pintar en la UI ----
+        const stHostEl = document.getElementById('stHost');
+        const stPortEl = document.getElementById('stPort');
+
+        if (stHostEl) stHostEl.value = (prefs?.serverTapHost ?? '');
+        if (stPortEl) stPortEl.value = (prefs?.serverTapPort ?? 4570);
+
+      }catch(e){ appendLog('⚠️ No se pudo cargar estado inicial: '+e); }
+    })();
+
+    // Guardar ServerTap (no pierde TTS porque los incluimos en el body)
+document.getElementById('stSaveBtn')?.addEventListener('click', async () => {
+  const host = document.getElementById('stHost')?.value.trim() || '';
+  const port = parseInt(document.getElementById('stPort')?.value, 10) || 4570;
+
+  const body = {
+    serverTapHost: host,
+    serverTapPort: port,
+    // por si quieres mantener los prefs TTS en la misma llamada:
+    ttsEnabled: document.getElementById('ttsEnabled')?.checked,
+    ttsVoice: document.getElementById('ttsVoice')?.value
+  };
+
+  try {
+    const r = await fetch('/setPrefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    toast(`✅ ServerTap guardado: ${(j?.prefs?.serverTapHost || 'localhost')}:${j?.prefs?.serverTapPort ?? 4570}`);
+  } catch {
+    toast('❌ No se pudo guardar ServerTap');
+  }
+});
+
+// Volver a localhost (limpia host y pone 4570) y guarda
+document.getElementById('stClearBtn')?.addEventListener('click', () => {
+  const hostEl = document.getElementById('stHost');
+  const portEl = document.getElementById('stPort');
+  if (hostEl) hostEl.value = '';
+  if (portEl) portEl.value = 4570;
+  document.getElementById('stSaveBtn')?.click();
+});
+
+// ---- Sound Library ----
+const soundLib = {
+  modal: $('#soundLibModal'),
+  q: $('#slQuery'),
+  btn: $('#slSearchBtn'),
+  results: $('#slResults'),
+  close: $('#slClose')
+};
+
+openSoundLibBtn?.addEventListener('click', () => {
+  soundLib.q.value = (giftPickerLabel.textContent.includes('— Selecciona') ? '' : giftPickerLabel.textContent.split(' — ')[0]) || '';
+  soundLib.results.innerHTML = '';
+  soundLib.modal.showModal();
+});
+
+soundLib.close?.addEventListener('click', (e) => { e.preventDefault(); soundLib.modal.close(); });
+
+async function searchSounds(q){
+  soundLib.results.innerHTML = '<div class="text-sm text-zinc-500">Buscando…</div>';
+  try{
+    const r = await fetch('/soundlib?q=' + encodeURIComponent(q));
+    const j = await r.json();
+    if (!j.items?.length) {
+      soundLib.results.innerHTML = '<div class="text-sm text-zinc-500">Sin resultados.</div>';
+      return;
+    }
+    soundLib.results.innerHTML = '';
+j.items.forEach(it => {
+  const row = document.createElement('div');
+  row.className = 'flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2';
+  row.innerHTML = `
+    <div class="flex-1">
+      <div class="text-sm font-medium truncate">${it.title || 'Sound'}</div>
+      <div class="text-[11px] text-zinc-500 truncate">${it.mp3}</div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" class="playBtn rounded-lg bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-2 py-1 text-xs">Play</button>
+      <button type="button" class="applyBtn rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 text-xs">Aplicar</button>
+    </div>
+  `;
+
+  // Evitar submit del form que cierra el dialog
+  const playBtn = row.querySelector('.playBtn');
+  const applyBtn = row.querySelector('.applyBtn');
+
+  playBtn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { new Audio(it.mp3).play(); } catch {}
+  });
+
+  applyBtn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    inpSound.value = it.mp3;
+    if (!chkSound.checked) { chkSound.checked = true; syncActionFields(); }
+    soundLib.modal.close();
+  });
+
+  soundLib.results.appendChild(row);
+});
+
+  } catch {
+    soundLib.results.innerHTML = '<div class="text-sm text-rose-500">Error consultando la librería.</div>';
+  }
+}
+
+soundLib.btn?.addEventListener('click', (e) => {
+  e.preventDefault();
+  const q = soundLib.q.value.trim();
+  if (!q) return;
+  searchSounds(q);
+});
+
+
+
+    // ---------- Sockets ----------
+    socket.on('log', appendLog);
+    socket.on('connected', setStatus);
+
+    // 🔊 Reproducir sonidos que indique el servidor
+socket.on('playSound', ({ url, volume }) => {
+  if (!url) return;
+  try {
+    const a = new Audio(url);
+    a.volume = Math.max(0, Math.min(1, parseFloat(volume ?? 1) || 1));
+    a.play().catch(e => appendLog('⚠️ Audio bloqueado por el navegador: ' + e));
+  } catch (e) {
+    appendLog('⚠️ Error reproduciendo sonido: ' + e);
+  }
+});
+
+    socket.on('topGiftUpdate', (tg) => {
+      if(!tg) return;
+      $('#topGiftName').textContent = tg.giftName || '—';
+      $('#topGiftUser').textContent = tg.username ? `por ${tg.username}` : '—';
+      $('#topGiftDiamonds').textContent = tg.diamondCount || 0;
+      const img = $('#topGiftImg');
+      if(tg.giftImage){ img.src = tg.giftImage; img.classList.remove('hidden'); } else { img.classList.add('hidden'); }
+    });
+
+    socket.on('goals', (g)=> { goals = g; renderGoals(); });
+    socket.on('likeProgress', (likes)=> { goals.likes = likes; renderGoals(); });
+    socket.on('followersProgress', (f)=> { goals.followers = f; renderGoals(); });
+
+    socket.on('giftCatalog', (catalog) => {
+  giftCatalog = catalog || {};
+  renderGiftCatalog(); // ya ordena internamente
+  appendLog(`🧩 Catálogo recibido (${Object.keys(giftCatalog).length})`);
+  for (const tr of $$('#webhookBody tr')) {
+    const id = tr.dataset.giftId;
+    renderGiftCell(tr.querySelector('.giftLabel'), id);
+  }
+});
+
+
+
+    socket.on('newGift', ({giftId, username, quantity}) => {
+      appendLog(`🎁 ${username} envió ID ${giftId} x${quantity}`);
+    });
+
+    // fijar metas
+    likesSet?.addEventListener('click', async ()=>{
+      const target = Math.max(1, parseInt(likesTarget.value || goals.likes.target, 10) || goals.likes.target);
+      await fetch('/setGoals', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ likes:{target, current: goals.likes.current}, followers: goals.followers })});
+    });
+    likesReset?.addEventListener('click', async ()=>{
+      await fetch('/setGoals', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ likes:{target: goals.likes.target, current:0}, followers: goals.followers })});
+    });
+
+    followsSet?.addEventListener('click', async ()=>{
+      const target = Math.max(1, parseInt(followsTarget.value || goals.followers.target, 10) || goals.followers.target);
+      await fetch('/setGoals', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ followers:{target, current: goals.followers.current}, likes: goals.likes })});
+    });
+    followsReset?.addEventListener('click', async ()=>{
+      await fetch('/setGoals', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ followers:{target: goals.followers.target, current:0}, likes: goals.likes })});
+    });
+
+    // Guardar prefs TTS
+    function savePrefs(){
+      fetch('/setPrefs', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ttsEnabled: ttsEnabled?.checked, ttsVoice: ttsVoice?.value || 'default' })
+      }).catch(()=>{});
+    }
+    ttsEnabled?.addEventListener('change', savePrefs);
+    ttsVoice?.addEventListener('change', savePrefs);
+
+    // Exponer para debug
+    window.saveWebhooks = saveWebhooks;
+  </script>
+
+  <style>
+#toast {
+  position: fixed; z-index: 9999; right: 16px; bottom: 16px;
+  display: none; max-width: 360px;
+}
+.toast-card {
+  background: #111827; color: #fff; border: 1px solid #1f2937;
+  border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  font-size: 14px; display: flex; align-items: center; gap: 8px;
+}
+.toast-card .ok { color: #22c55e; }
+</style>
+<div id="toast"><div class="toast-card"><span class="ok">✔</span><span id="toastMsg"></span></div></div>
+<script>
+  (function(){
+    let tId=null;
+    window.toast = function(msg, ms=1800){
+      const box = document.getElementById('toast');
+      const m = document.getElementById('toastMsg');
+      if (!box || !m) return;
+      m.textContent = msg;
+      box.style.display = 'block';
+      box.style.opacity = '0';
+      requestAnimationFrame(()=>{
+        box.style.transition = 'opacity .15s ease, transform .2s ease';
+        box.style.transform = 'translateY(0)';
+        box.style.opacity = '1';
+      });
+      clearTimeout(tId);
+      tId = setTimeout(()=>{
+        box.style.opacity = '0';
+        setTimeout(()=>{ box.style.display='none'; }, 180);
+      }, ms);
+    };
+  })();
+</script>
+</body>
+</html>

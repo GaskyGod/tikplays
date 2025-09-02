@@ -1,0 +1,27 @@
+{
+  "titleLeft": "Me reinicias",
+  "titleRight": "Me salvas",
+  "pointsPerCoin": 1,
+  "leadCountdown": 10,
+  "autoResetOnWin": false,
+  "left": {
+    "points": 0,
+    "gifts": [
+      "5269",
+      "5487",
+      "5509"
+    ]
+  },
+  "right": {
+    "points": 1,
+    "gifts": [
+      "5655",
+      "5658",
+      "5978"
+    ]
+  },
+  "display": {
+    "mode": "rotate",
+    "intervalMs": 1200
+  }
+}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Top Monedas</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="color-scheme" content="dark light">
+  <style>
+    body { background: transparent; }
+    .icon-coin { width: 14px; height: 14px; display:inline-block; vertical-align:-2px; }
+  </style>
+</head>
+<body class="text-zinc-100">
+  <div id="root" class="w-[420px] bg-black/50 rounded-2xl p-4 border border-white/10">
+    <h2 id="title" class="text-lg font-bold mb-3">Top Monedas</h2>
+    <div id="list" class="space-y-2"></div>
+  </div>
+
+  <script>
+    const socket = io();
+    const $ = s => document.querySelector(s);
+    const list = $('#list');
+    const title = $('#title');
+
+    // Permite override por query: ?icon=https://.../moneda.png
+    const qp = new URLSearchParams(location.search);
+    const iconOverride = qp.get('icon');
+
+    function n(x){ return (x||0).toLocaleString(); }
+
+    // Devuelve el HTML del contador con icono o unit
+    function coinHTML(amount, unit, iconUrl){
+      const url = iconOverride || iconUrl; // prioridad al query param
+      if (url) {
+        return `<img src="${url}" class="icon-coin" alt=""> ${n(amount)}`;
+      }
+      // fallback a texto (unit)
+      const sym = (typeof unit === 'string' && unit.trim()) ? unit : '💎';
+      return `${sym} ${n(amount)}`;
+    }
+
+    function row(i, u){
+  const badge = i===0? '👑' : (i===1? '🥈' : (i===2? '🥉' : `${i+1}.`));
+  const circle = u.avatar
+    ? `<img src="${u.avatar}" class="w-9 h-9 rounded-full object-cover">`
+    : `<div class="w-9 h-9 rounded-full bg-zinc-700/70"></div>`;
+
+  return `
+    <div class="flex items-center gap-3 bg-zinc-900/50 rounded-xl px-3 py-2">
+      <div class="w-6 text-center">${badge}</div>
+      ${circle}
+      <div class="flex-1 min-w-0">
+        <div class="font-medium truncate">${u.name || u.id}</div>
+        <div class="text-[11px] text-amber-300/90 flex items-center gap-1">
+          <img src="https://static.vecteezy.com/system/resources/thumbnails/023/588/193/small/coin-with-dollar-sign-golden-dollar-symbol-gold-coin-3d-stack-of-gold-coins-icon-isolated-symbol-png.png"
+               class="inline w-4 h-4">
+          ${n(u.coins)}
+        </div>
+      </div>
+    </div>`;
+}
+
+
+    socket.on('coinBoard', ({ title: t, rows, unit, coinIconUrl }) => {
+      title.textContent = t || 'Top Monedas';
+      list.innerHTML = (rows && rows.length)
+        ? rows.map((u, i) => row(i, u, unit, coinIconUrl)).join('')
+        : '<div class="text-sm text-zinc-400">Todavía no hay monedas.</div>';
+    });
+  </script>
+</body>
+</html>

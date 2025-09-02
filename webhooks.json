@@ -1,0 +1,18 @@
+{
+  "5269": {
+    "repeat": 1,
+    "soundUrl": "https://www.myinstants.com/media/sounds/pop_7e9Is8L.mp3",
+    "soundVolume": 1
+  },
+  "5509": {
+    "repeat": 1,
+    "soundUrl": "https://www.myinstants.com/media/sounds/record-online-voice-recorder_h5sKNGR.mp3",
+    "soundVolume": 1
+  },
+  "5655": {
+    "webhook": "http://localhost:5729/spawnProps?id=0&quantity=50&size=3&ragdoll=true&fromLikes=false&userName={nickname}",
+    "repeat": 1,
+    "soundUrl": "https://www.myinstants.com/media/sounds/classic_hurt.mp3",
+    "soundVolume": 1
+  }
+}

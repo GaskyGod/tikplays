@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Overlay Wins</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html,body { background: transparent; }
+
+    .card {
+      background: #1e1e1e; /* fondo oscuro */
+      border-radius: 8px;
+      padding: .4rem .8rem;
+      display: inline-flex;
+      align-items: center;
+      gap: .6rem;
+      font-family: system-ui, sans-serif;
+    }
+    .icon {
+      font-size: 28px;
+    }
+    .label {
+      font-weight: 700;
+      font-size: 28px;
+      color: #fff;
+    }
+    .pill {
+      background: #2a2a2a;
+      border-radius: 6px;
+      padding: .15rem .4rem;
+      min-width: 36px;
+      text-align: center;
+      display:inline-block;
+      font-weight: 700;
+      color: #fff;
+    }
+    .slash {
+      font-weight: 600;
+      font-size: 26px;
+      color: #fff;
+      opacity: .9;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🏆</div>
+    <div class="label">
+      Win <span id="winsNow" class="pill">0</span>
+      <span class="slash">/</span>
+      <span id="winsGoal" class="pill">5</span>
+    </div>
+  </div>
+
+  <script>
+    const q = new URLSearchParams(location.search);
+    const goalQ = q.get('goal');
+    const socket = io();
+
+    const elWins = document.getElementById('winsNow');
+    const elGoal = document.getElementById('winsGoal');
+
+    if (goalQ) elGoal.textContent = goalQ;
+
+    function paint(state){
+      const wins = Number.isFinite(state.wins) ? state.wins : 0;
+      elWins.textContent = wins;
+      if (goalQ) elGoal.textContent = goalQ;
+      else if (Number.isFinite(state.goal)) elGoal.textContent = state.goal;
+    }
+
+    fetch('/getWins').then(r=>r.json()).then(paint).catch(()=>{});
+    socket.on('wins', paint);
+  </script>
+</body>
+</html>
