@@ -2,7 +2,7 @@
   "name": "tikplays",
   "version": "2.0.4",
   "description": "App de Webhooks para TikTok Live con overlays y Electron.",
-  "author": "Gaskygod",
+  "author": "GaskyGod",
   "main": "electron/main.js",
   "scripts": {
     "dev": "electron .",
@@ -67,7 +67,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "Gaskygod",
+        "owner": "GaskyGod",
         "repo": "tikplays",
         "releaseType": "release"
       }
