@@ -2,6 +2,7 @@
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, session, globalShortcut } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+
 autoUpdater.logger = log;
 autoUpdater.logger.transports.file.level = 'info';
 log.info('App start', app.getVersion());
@@ -14,13 +15,6 @@ const crypto = require('crypto');
 let mainWindow;
 let tray;
 const SERVER_URL = 'http://localhost:3000';
-
-// justo antes del primer check:
-autoUpdater.setFeedURL({
-  provider: 'github',
-  owner: 'GaskyGod',   // respeta mayúsculas como en tu repo
-  repo: 'tikplays'
-});
 
 // ======== Device ID estable ========
 function getStableDeviceId() {
@@ -48,9 +42,7 @@ app.whenReady().then(() => {
 ipcMain.handle('device:getId', () => DEVICE_ID);
 
 // ======== Datos persistentes ========
-try {
-  process.chdir(path.join(__dirname, '..'));
-} catch {}
+try { process.chdir(path.join(__dirname, '..')); } catch {}
 process.env.TIKPLAYS_DATA_DIR = app.getPath('userData');
 
 // Arranca el servidor Express
@@ -197,25 +189,40 @@ if (!gotLock) {
     registerWinsHotkeys();
 
     // ======== AutoUpdater ========
-if (!isDev) {
-  autoUpdater.autoDownload = true;
-  // Haz un primer check con notify (por si quieres notificación del sistema)
-  autoUpdater.checkForUpdatesAndNotify().catch(err => log.error('checkForUpdatesAndNotify error', err));
+    if (!isDev) {
+      // feed explícito a GitHub (por si acaso)
+      const feed = { provider: 'github', owner: 'GaskyGod', repo: 'tikplays' };
+      try {
+        autoUpdater.setFeedURL(feed);
+        log.info('Feed set', feed);
+      } catch (e) {
+        log.error('setFeedURL error', e);
+      }
 
-  // Y además fuerza un check a los 5s (a veces al inicio la red tarda)
-  setTimeout(() => {
-    log.info('Forcing update check (5s after start)…');
-    autoUpdater.checkForUpdates().catch(err => log.error('checkForUpdates error', err));
-  }, 5000);
+      autoUpdater.autoDownload = true;
 
-  // Repite cada 5 minutos (opcional)
-  setInterval(() => {
-    log.info('Periodic update check…');
-    autoUpdater.checkForUpdates().catch(err => log.error('periodic check error', err));
-  }, 5 * 60 * 1000);
-}
+      // primer check con notificación
+      autoUpdater.checkForUpdatesAndNotify().catch(err =>
+        log.error('checkForUpdatesAndNotify error', err)
+      );
 
-});
+      // segundo check a los 5s
+      setTimeout(() => {
+        log.info('Forcing update check (5s after start)…');
+        autoUpdater.checkForUpdates().catch(err =>
+          log.error('checkForUpdates error', err)
+        );
+      }, 5000);
+
+      // checks periódicos (5 min)
+      setInterval(() => {
+        log.info('Periodic update check…');
+        autoUpdater.checkForUpdates().catch(err =>
+          log.error('periodic check error', err)
+        );
+      }, 5 * 60 * 1000);
+    }
+  });
 }
 
 app.on('window-all-closed', () => {
@@ -242,6 +249,7 @@ autoUpdater.on('error', (err) => {
   mainWindow?.webContents.send('update:error', String(err));
 });
 
+// logs detallados
 autoUpdater.on('checking-for-update', () => log.info('checking-for-update'));
 autoUpdater.on('update-available', (info) => log.info('update-available', info));
 autoUpdater.on('update-not-available', (info) => log.info('update-not-available', info));
@@ -249,10 +257,10 @@ autoUpdater.on('download-progress', (p) => log.info('download-progress', Math.ro
 autoUpdater.on('update-downloaded', (info) => log.info('update-downloaded', info));
 autoUpdater.on('error', (err) => log.error('update error', err));
 
+// IPC para UI
 ipcMain.handle('update:installNow', () => {
   autoUpdater.quitAndInstall();
 });
-
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('update:checkNow', async () => {
   try {
@@ -263,4 +271,3 @@ ipcMain.handle('update:checkNow', async () => {
     throw e;
   }
 });
-
