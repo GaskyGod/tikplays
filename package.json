@@ -16,6 +16,8 @@
     "cheerio": "^1.1.2",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.1.8",
     "express": "^4.19.2",
     "firebase-admin": "^12.7.0",
     "helmet": "^7.1.0",
@@ -25,8 +27,7 @@
     "qs": "^6.14.0",
     "say": "0.16.0",
     "socket.io": "^4.7.5",
-    "tiktok-live-connector": "^1.2.3",
-    "electron-updater": "^6.1.8"
+    "tiktok-live-connector": "^1.2.3"
   },
   "devDependencies": {
     "electron": "29.4.0",

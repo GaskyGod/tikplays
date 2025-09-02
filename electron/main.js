@@ -1,6 +1,11 @@
 // electron/main.js
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, session, globalShortcut } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'info';
+log.info('App start', app.getVersion());
+
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -142,6 +147,7 @@ function createTray() {
     { label: 'Overlay Likes', click: () => createOverlayWindow('likes', { title: 'Meta de Likes', accent: '#22c55e', rounded: 24 }) },
     { label: 'Overlay Seguidores', click: () => createOverlayWindow('followers', { title: 'Meta de Seguidores', accent: 'deepskyblue', rounded: 24 }) },
     { label: 'Overlay Ambos', click: () => createOverlayWindow('both', { title: '¡Vamos con todo!', accent: '#a855f7', rounded: 20 }) },
+    { label: 'Buscar actualización', click: () => autoUpdater.checkForUpdates().catch(()=>{}) },
     { type: 'separator' },
     { label: 'Ir al navegador', click: () => shell.openExternal(SERVER_URL) },
     { label: 'Salir', role: 'quit' }
@@ -184,6 +190,26 @@ if (!gotLock) {
     registerWinsHotkeys();
 
     // ======== AutoUpdater ========
+if (!isDev) {
+  autoUpdater.autoDownload = true;
+  // Haz un primer check con notify (por si quieres notificación del sistema)
+  autoUpdater.checkForUpdatesAndNotify().catch(err => log.error('checkForUpdatesAndNotify error', err));
+
+  // Y además fuerza un check a los 5s (a veces al inicio la red tarda)
+  setTimeout(() => {
+    log.info('Forcing update check (5s after start)…');
+    autoUpdater.checkForUpdates().catch(err => log.error('checkForUpdates error', err));
+  }, 5000);
+
+  // Repite cada 5 minutos (opcional)
+  setInterval(() => {
+    log.info('Periodic update check…');
+    autoUpdater.checkForUpdates().catch(err => log.error('periodic check error', err));
+  }, 5 * 60 * 1000);
+}
+
+
+    // ======== AutoUpdater ========
     if (!isDev) {
       autoUpdater.autoDownload = true;
       autoUpdater.checkForUpdatesAndNotify();
@@ -214,6 +240,26 @@ autoUpdater.on('update-downloaded', () => {
 autoUpdater.on('error', (err) => {
   mainWindow?.webContents.send('update:error', String(err));
 });
+
+autoUpdater.on('checking-for-update', () => log.info('checking-for-update'));
+autoUpdater.on('update-available', (info) => log.info('update-available', info));
+autoUpdater.on('update-not-available', (info) => log.info('update-not-available', info));
+autoUpdater.on('download-progress', (p) => log.info('download-progress', Math.round(p.percent) + '%'));
+autoUpdater.on('update-downloaded', (info) => log.info('update-downloaded', info));
+autoUpdater.on('error', (err) => log.error('update error', err));
+
 ipcMain.handle('update:installNow', () => {
   autoUpdater.quitAndInstall();
 });
+
+ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('update:checkNow', async () => {
+  try {
+    log.info('Manual update check invoked');
+    return await autoUpdater.checkForUpdates(); // retorna info si hay
+  } catch (e) {
+    log.error('checkForUpdates error', e);
+    throw e;
+  }
+});
+

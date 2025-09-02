@@ -135,7 +135,32 @@
             Importar <input id="importInput" type="file" accept="application/json" class="hidden">
           </label>
         </div>
-        <div class="mt-2">v2.0.8 • Español By Gasky ❤</div>
+        <div class="mt-2 text-[11px] text-zinc-500">
+  <span id="appVer">v?</span> • Español By Gasky ❤
+  <button id="checkUpdBtn" class="ml-2 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 hover:bg-zinc-800">
+    Buscar actualización
+  </button>
+</div>
+<script>
+(async () => {
+  const ipc = window.electron?.ipcRenderer;
+  if (ipc) {
+    try {
+      const ver = await ipc.invoke('app:getVersion');
+      document.getElementById('appVer').textContent = 'v' + ver;
+    } catch {}
+    document.getElementById('checkUpdBtn')?.addEventListener('click', async () => {
+      try {
+        await ipc.invoke('update:checkNow');
+        toast('🔎 Buscando actualización…');
+      } catch (e) {
+        toast('❌ Error al buscar actualización');
+      }
+    });
+  }
+})();
+</script>
+
       </div>
     </aside>
 
