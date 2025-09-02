@@ -1,5 +1,15 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, shell, ipcMain, session, globalShortcut } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  shell,
+  ipcMain,
+  session,
+  globalShortcut,
+  nativeImage
+} = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
@@ -7,8 +17,12 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 
+// Recomendado en Windows para notificaciones y updater
+app.setAppUserModelId('com.gaskygod.tikplays');
+
+// ======== Logger & Updater ========
 autoUpdater.logger = log;
-autoUpdater.logger.transports.file.level = 'debug'; // más verboso
+autoUpdater.logger.transports.file.level = 'debug';
 log.info('App start', app.getVersion());
 
 // ======== Helpers de entorno ========
@@ -17,13 +31,13 @@ log.info('[env] isPackaged=', isDev ? 'false' : 'true', 'platform=', process.pla
 log.info('[env] currentVersion=', app.getVersion());
 log.info('[env] resourcesPath=', process.resourcesPath);
 
-// Intenta listar resources para ver si app-update.yml existe
+// Intenta listar resources para verificar app-update.yml y public/*
 try {
   const resDir = process.resourcesPath || path.join(process.cwd(), 'resources');
   const files = fs.existsSync(resDir) ? fs.readdirSync(resDir) : [];
   log.info('[env] resources files=', files);
   const updPath = path.join(resDir, 'app-update.yml');
-  log.info('[env] app-update.yml exists=', fs.existsSync(updPath), ' -> ', updPath);
+  log.info('[env] app-update.yml exists=', fs.existsSync(updPath), '->', updPath);
 } catch (e) {
   log.warn('[env] cannot list resources', e);
 }
@@ -61,20 +75,37 @@ ipcMain.handle('device:getId', () => DEVICE_ID);
 try { process.chdir(path.join(__dirname, '..')); } catch {}
 process.env.TIKPLAYS_DATA_DIR = app.getPath('userData');
 
-// Arranca el servidor Express
+// Arranca el servidor Express de la app
 require(path.join(__dirname, '..', 'server.js'));
 
-// Helper cache-busting
+// ======== Helpers ========
 function cacheBustUrl(baseUrl) {
-  const v = encodeURIComponent(`${app.getVersion?.() || '0.0.0'}-${Date.now()}`);
+  const v = encodeURIComponent(`${(app.getVersion && app.getVersion()) || '0.0.0'}-${Date.now()}`);
   const hasQuery = baseUrl.includes('?');
   return `${baseUrl}${hasQuery ? '&' : '?'}_v=${v}`;
 }
 
-// ======== Fallback fetch ========
 let _fetch = global.fetch;
 if (typeof _fetch !== 'function') {
   _fetch = (...a) => import('node-fetch').then(({ default: f }) => f(...a));
+}
+
+// Localiza assets tanto en dev como empaquetado
+function resolveAsset(...p) {
+  // 1) resources (packaged)
+  const inResources = path.join(process.resourcesPath, ...p);
+  if (fs.existsSync(inResources)) return inResources;
+
+  // 2) asar (cuando corre desde /electron)
+  const inAsar = path.join(__dirname, '..', ...p);
+  if (fs.existsSync(inAsar)) return inAsar;
+
+  // 3) cwd (dev)
+  const inCwd = path.join(process.cwd(), ...p);
+  if (fs.existsSync(inCwd)) return inCwd;
+
+  log.warn('[asset] not found ->', p.join('/'));
+  return null;
 }
 
 // ======== Hotkeys WINS ========
@@ -112,9 +143,19 @@ async function createMainWindow () {
       nodeIntegration: false
     }
   });
+
+  // Sin menú nativo
   Menu.setApplicationMenu(null);
+
+  // Evita cerrar la app: oculta a bandeja
+  mainWindow.on('close', (e) => {
+    e.preventDefault();
+    mainWindow.hide();
+  });
+
   mainWindow.loadURL(cacheBustUrl(SERVER_URL));
   if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
+
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -126,8 +167,9 @@ function createOverlayWindow (metric = 'both', opts = {}) {
     bg: opts.bg || 'transparent',
     rounded: String(!!opts.rounded ? opts.rounded : 20),
     compact: String(!!opts.compact),
-    _v: `${app.getVersion?.() || '0.0.0'}-${Date.now()}`
+    _v: `${(app.getVersion && app.getVersion()) || '0.0.0'}-${Date.now()}`
   }).toString();
+
   const win = new BrowserWindow({
     width: metric === 'both' ? 900 : 600,
     height: 200,
@@ -148,11 +190,22 @@ function createOverlayWindow (metric = 'both', opts = {}) {
 }
 
 function createTray() {
-  tray = new Tray(
-    process.platform === 'darwin'
-      ? path.join(__dirname, '..', 'public', 'iconTemplate.png')
-      : path.join(__dirname, '..', 'public', 'icon.png')
-  );
+  log.info('[tray] creating tray…');
+
+  const iconName = process.platform === 'darwin' ? 'iconTemplate.png' : 'icon.png';
+  const iconPath = resolveAsset('public', iconName);
+  if (!iconPath) {
+    log.error('[tray] No se encontró el ícono de bandeja');
+    return;
+  }
+
+  const image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) {
+    log.error('[tray] nativeImage vacío para', iconPath);
+    return;
+  }
+
+  tray = new Tray(image);
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Abrir app', click: () => { if (!mainWindow) createMainWindow(); else mainWindow.show(); } },
     { type: 'separator' },
@@ -173,10 +226,13 @@ function createTray() {
     },
     { type: 'separator' },
     { label: 'Ir al navegador', click: () => shell.openExternal(SERVER_URL) },
-    { label: 'Salir', role: 'quit' }
+    { label: 'Salir', click: () => { log.info('[tray] quit via tray'); app.quit(); } }
   ]);
-  tray.setToolTip('TikTok Live Webhooks');
+  tray.setToolTip('Tikplays');
   tray.setContextMenu(contextMenu);
+
+  // Click en el icono para mostrar la ventana
+  tray.on('click', () => { if (!mainWindow) createMainWindow(); else mainWindow.show(); });
 }
 
 // ======== Single instance ========
@@ -187,6 +243,7 @@ if (!gotLock) {
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
       mainWindow.focus();
     }
   });
@@ -208,13 +265,15 @@ if (!gotLock) {
         callback({ responseHeaders: headers });
       });
     } catch {}
+
     await createMainWindow();
     createTray();
     registerWinsHotkeys();
 
     // ======== AutoUpdater ========
     if (!isDev) {
-      autoUpdater.autoDownload = true;
+      autoUpdater.autoDownload = true; // descarga automática
+      // Nota: quitAndInstall() se llama cuando 'update-downloaded'
 
       // PRIMER chequeo al inicio
       log.info('[upd] calling checkForUpdatesAndNotify()');
@@ -235,9 +294,12 @@ if (!gotLock) {
   });
 }
 
+// Mantén el proceso vivo (bandeja) aunque se cierren las ventanas
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // No salimos en Windows para mantener el tray activo
+  // if (process.platform !== 'darwin') app.quit();
 });
+
 ipcMain.handle('winsHotkeys:update', () => registerWinsHotkeys());
 ipcMain.handle('overlay:open', (_evt, metric, opts) => { createOverlayWindow(metric, opts); });
 app.on('will-quit', () => { globalShortcut.unregisterAll(); });
@@ -256,7 +318,6 @@ autoUpdater.on('error', (err) => log.error('update error', err));
 ipcMain.handle('update:installNow', () => {
   autoUpdater.quitAndInstall();
 });
-
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('update:checkNow', async () => {
   try {
