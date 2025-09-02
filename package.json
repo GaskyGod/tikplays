@@ -1,6 +1,6 @@
 {
   "name": "tikplays",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "App de Webhooks para TikTok Live con overlays y Electron.",
   "author": "GaskyGod",
   "main": "electron/main.js",
