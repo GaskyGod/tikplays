@@ -1,21 +1,20 @@
-// preload.js
+// electron/preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
 (async () => {
-  let deviceId;
+  let deviceId = '';
   try {
-    deviceId = await ipcRenderer.invoke('device:getId');
-  } catch {
-    deviceId = 'fallback-' + Math.random().toString(36).slice(2);
-  }
+    deviceId = await ipcRenderer.invoke('device:getId'); // estable desde main
+  } catch {}
 
-  // Exponer el deviceId estable al renderer
+  // Guarda también en localStorage para que la UI lo lea sin esperar
+  try { localStorage.setItem('deviceId', deviceId || ''); } catch {}
+
+  // expón APIs
   contextBridge.exposeInMainWorld('deviceInfo', { deviceId });
+  contextBridge.exposeInMainWorld('electron', { ipcRenderer });
 
-  // Exponer un puente mínimo para invocar IPC desde el renderer
-  contextBridge.exposeInMainWorld('electron', {
-    ipcRenderer: {
-      invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
-    }
-  });
+  // opcional: promesa para “esperar el ID”
+  const ready = Promise.resolve(deviceId);
+  contextBridge.exposeInMainWorld('waitForDeviceId', () => ready);
 })();
