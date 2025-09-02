@@ -15,6 +15,13 @@ let mainWindow;
 let tray;
 const SERVER_URL = 'http://localhost:3000';
 
+// justo antes del primer check:
+autoUpdater.setFeedURL({
+  provider: 'github',
+  owner: 'GaskyGod',   // respeta mayúsculas como en tu repo
+  repo: 'tikplays'
+});
+
 // ======== Device ID estable ========
 function getStableDeviceId() {
   const idFile = path.join(app.getPath('userData'), 'device.id');
@@ -208,13 +215,7 @@ if (!isDev) {
   }, 5 * 60 * 1000);
 }
 
-
-    // ======== AutoUpdater ========
-    if (!isDev) {
-      autoUpdater.autoDownload = true;
-      autoUpdater.checkForUpdatesAndNotify();
-    }
-  });
+});
 }
 
 app.on('window-all-closed', () => {
