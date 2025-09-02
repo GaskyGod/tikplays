@@ -2,15 +2,31 @@
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, session, globalShortcut } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
-
-autoUpdater.logger = log;
-autoUpdater.logger.transports.file.level = 'info';
-log.info('App start', app.getVersion());
-
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = 'debug'; // más verboso
+log.info('App start', app.getVersion());
+
+// ======== Helpers de entorno ========
+const isDev = !app.isPackaged;
+log.info('[env] isPackaged=', isDev ? 'false' : 'true', 'platform=', process.platform, 'arch=', process.arch);
+log.info('[env] currentVersion=', app.getVersion());
+log.info('[env] resourcesPath=', process.resourcesPath);
+
+// Intenta listar resources para ver si app-update.yml existe
+try {
+  const resDir = process.resourcesPath || path.join(process.cwd(), 'resources');
+  const files = fs.existsSync(resDir) ? fs.readdirSync(resDir) : [];
+  log.info('[env] resources files=', files);
+  const updPath = path.join(resDir, 'app-update.yml');
+  log.info('[env] app-update.yml exists=', fs.existsSync(updPath), ' -> ', updPath);
+} catch (e) {
+  log.warn('[env] cannot list resources', e);
+}
 
 let mainWindow;
 let tray;
@@ -47,9 +63,6 @@ process.env.TIKPLAYS_DATA_DIR = app.getPath('userData');
 
 // Arranca el servidor Express
 require(path.join(__dirname, '..', 'server.js'));
-
-// ======== Modo dev ========
-const isDev = !app.isPackaged;
 
 // Helper cache-busting
 function cacheBustUrl(baseUrl) {
@@ -146,7 +159,18 @@ function createTray() {
     { label: 'Overlay Likes', click: () => createOverlayWindow('likes', { title: 'Meta de Likes', accent: '#22c55e', rounded: 24 }) },
     { label: 'Overlay Seguidores', click: () => createOverlayWindow('followers', { title: 'Meta de Seguidores', accent: 'deepskyblue', rounded: 24 }) },
     { label: 'Overlay Ambos', click: () => createOverlayWindow('both', { title: '¡Vamos con todo!', accent: '#a855f7', rounded: 20 }) },
-    { label: 'Buscar actualización', click: () => autoUpdater.checkForUpdates().catch(()=>{}) },
+    { type: 'separator' },
+    {
+      label: 'Buscar actualización (main)',
+      click: async () => {
+        try {
+          log.info('[tray] manual checkForUpdates()');
+          await autoUpdater.checkForUpdates();
+        } catch (e) {
+          log.error('[tray] checkForUpdates error', e);
+        }
+      }
+    },
     { type: 'separator' },
     { label: 'Ir al navegador', click: () => shell.openExternal(SERVER_URL) },
     { label: 'Salir', role: 'quit' }
@@ -168,9 +192,6 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
-    log.info('[env] isPackaged=', app.isPackaged, 'platform=', process.platform, 'arch=', process.arch);
-    log.info('[env] currentVersion=', app.getVersion());
-
     try { await session.defaultSession.clearCache(); } catch {}
     try {
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -191,52 +212,24 @@ if (!gotLock) {
     createTray();
     registerWinsHotkeys();
 
-    // --- DIAGNÓSTICO: comprobar latest.yml directamente ---
-try {
-  const url = 'https://github.com/GaskyGod/tikplays/releases/latest/download/latest.yml';
-  log.info('[diag] Fetching latest.yml', url);
-  const res = await _fetch(url, { cache: 'no-store' });
-  log.info('[diag] latest.yml status', res.status);
-  const text = await res.text();
-  log.info('[diag] latest.yml first 200 chars:', text.slice(0, 200).replace(/\n/g, ' '));
-} catch (e) {
-  log.error('[diag] latest.yml fetch error', e);
-}
-// ------------------------------------------------------
-
-
     // ======== AutoUpdater ========
     if (!isDev) {
-      // feed explícito a GitHub (por si acaso)
-      const feed = { provider: 'github', owner: 'GaskyGod', repo: 'tikplays' };
-      try {
-        autoUpdater.setFeedURL(feed);
-        log.info('Feed set', feed);
-      } catch (e) {
-        log.error('setFeedURL error', e);
-      }
-
       autoUpdater.autoDownload = true;
 
-      // primer check con notificación
-      autoUpdater.checkForUpdatesAndNotify().catch(err =>
-        log.error('checkForUpdatesAndNotify error', err)
-      );
+      // PRIMER chequeo al inicio
+      log.info('[upd] calling checkForUpdatesAndNotify()');
+      autoUpdater.checkForUpdatesAndNotify().catch(err => log.error('[upd] checkForUpdatesAndNotify error', err));
 
-      // segundo check a los 5s
+      // SEGUNDO chequeo a los 5s
       setTimeout(() => {
-        log.info('Forcing update check (5s after start)…');
-        autoUpdater.checkForUpdates().catch(err =>
-          log.error('checkForUpdates error', err)
-        );
+        log.info('[upd] forcing checkForUpdates() after 5s');
+        autoUpdater.checkForUpdates().catch(err => log.error('[upd] checkForUpdates error', err));
       }, 5000);
 
-      // checks periódicos (5 min)
+      // Chequeo periódico cada 5 min
       setInterval(() => {
-        log.info('Periodic update check…');
-        autoUpdater.checkForUpdates().catch(err =>
-          log.error('periodic check error', err)
-        );
+        log.info('[upd] periodic checkForUpdates()');
+        autoUpdater.checkForUpdates().catch(err => log.error('[upd] periodic check error', err));
       }, 5 * 60 * 1000);
     }
   });
@@ -250,41 +243,27 @@ ipcMain.handle('overlay:open', (_evt, metric, opts) => { createOverlayWindow(met
 app.on('will-quit', () => { globalShortcut.unregisterAll(); });
 
 // ======== AutoUpdater events ========
-autoUpdater.on('update-available', (info) => {
-  mainWindow?.webContents.send('update:available', info);
-});
-autoUpdater.on('download-progress', (p) => {
-  mainWindow?.webContents.send('update:progress', {
-    percent: Math.round(p.percent),
-    transferred: p.transferred, total: p.total
-  });
-});
-autoUpdater.on('update-downloaded', () => {
-  autoUpdater.quitAndInstall(); // instala y reinicia automáticamente
-});
-autoUpdater.on('error', (err) => {
-  mainWindow?.webContents.send('update:error', String(err));
-});
-
-// logs detallados
 autoUpdater.on('checking-for-update', () => log.info('checking-for-update'));
 autoUpdater.on('update-available', (info) => log.info('update-available', info));
 autoUpdater.on('update-not-available', (info) => log.info('update-not-available', info));
 autoUpdater.on('download-progress', (p) => log.info('download-progress', Math.round(p.percent) + '%'));
-autoUpdater.on('update-downloaded', (info) => log.info('update-downloaded', info));
+autoUpdater.on('update-downloaded', (info) => {
+  log.info('update-downloaded', info);
+  autoUpdater.quitAndInstall(); // instala y reinicia automáticamente
+});
 autoUpdater.on('error', (err) => log.error('update error', err));
 
-// IPC para UI
 ipcMain.handle('update:installNow', () => {
   autoUpdater.quitAndInstall();
 });
+
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('update:checkNow', async () => {
   try {
-    log.info('Manual update check invoked');
-    return await autoUpdater.checkForUpdates(); // retorna info si hay
+    log.info('[ipc] Manual update check invoked');
+    return await autoUpdater.checkForUpdates();
   } catch (e) {
-    log.error('checkForUpdates error', e);
+    log.error('[ipc] checkForUpdates error', e);
     throw e;
   }
 });
