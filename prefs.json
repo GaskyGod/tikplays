@@ -1,9 +1,0 @@
-{
-  "ttsEnabled": false,
-  "ttsVoice": "default",
-  "winsHotkeys": {
-    "inc": "CommandOrControl+Alt+Up",
-    "dec": "CommandOrControl+Alt+Down",
-    "reset": "CommandOrControl+Alt+0"
-  }
-}
